@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+
+<html lang="es">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="theme-color"
+        content="#1565c0"
+    >
+
+    <meta
+        name="description"
+        content="Aplicación para gestionar y firmar albaranes"
+    >
+
+    <title>Gestión de Albaranes</title>
+
+    <link
+        rel="manifest"
+        href="manifest.json"
+    >
+
+    <link
+        rel="stylesheet"
+        href="styles.css"
+    >
+
+</head>
+
+
+<body>
+
+
+<!-- =====================================================
+     CABECERA
+===================================================== -->
+
+<header class="cabecera">
+
+    <div class="zona-cabecera-izquierda">
+
+        <button
+            id="btnInicio"
+            class="boton-inicio"
+            type="button"
+            title="Ir a la pantalla principal"
+        >
+            🏠 Inicio
+        </button>
+
+
+        <div class="datos-cabecera">
+
+            <h1>
+                Gestión de Albaranes
+            </h1>
+
+            <p
+                id="nombreEmpresaActiva"
+                class="nombre-empresa"
+            >
+                Pescados y Mariscos El Boquerón
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <button
+        id="btnCambiarEmpresa"
+        class="boton-empresa"
+        type="button"
+    >
+        Cambiar empresa
+    </button>
+
+</header>
+
+
+<!-- =====================================================
+     PANTALLA PRINCIPAL
+===================================================== -->
+
+<main
+    id="pantallaInicio"
+    class="pantalla"
+>
+
+    <section class="panel-principal">
+
+        <h2>
+            ¿Qué quieres hacer?
+        </h2>
+
+
+        <div class="menu-principal">
+
+
+            <button
+                id="btnAlbaranes"
+                class="boton-menu"
+                type="button"
+            >
+
+                <span class="icono-menu">
+                    📁
+                </span>
+
+                <span>
+                    Albaranes
+                </span>
+
+            </button>
+
+
+            <button
+                id="btnPendientes"
+                class="boton-menu boton-pendientes"
+                type="button"
+            >
+
+                <span class="icono-menu">
+                    ✍️
+                </span>
+
+                <span>
+                    Pendientes de firma
+                </span>
+
+                <span
+                    id="contadorPendientes"
+                    class="contador"
+                >
+                    0
+                </span>
+
+            </button>
+
+
+            <button
+                id="btnAnadir"
+                class="boton-menu boton-anadir"
+                type="button"
+            >
+
+                <span class="icono-menu">
+                    ➕
+                </span>
+
+                <span>
+                    Añadir albarán
+                </span>
+
+            </button>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     INPUT PDF
+===================================================== -->
+
+<input
+    id="selectorPDF"
+    type="file"
+    accept="application/pdf,.pdf"
+    hidden
+>
+
+
+<!-- =====================================================
+     IMPORTAR ALBARÁN
+===================================================== -->
+
+<main
+    id="pantallaImportacion"
+    class="pantalla oculto"
+>
+
+    <section class="panel">
+
+        <div class="barra-superior">
+
+            <button
+                id="btnVolverImportacion"
+                class="boton-volver"
+                type="button"
+            >
+                ← Volver
+            </button>
+
+            <h2>
+                Añadir albarán
+            </h2>
+
+        </div>
+
+
+        <div class="empresa-destino">
+
+            <span>
+                Empresa:
+            </span>
+
+            <strong
+                id="empresaDestinoImportacion"
+            >
+                Pescados y Mariscos El Boquerón
+            </strong>
+
+        </div>
+
+
+        <div class="estado-lectura">
+
+            <p id="estadoLectura">
+                Selecciona un PDF.
+            </p>
+
+        </div>
+
+
+        <div
+            id="datosAlbaran"
+            class="datos-albaran oculto"
+        >
+
+            <h3>
+                Datos detectados
+            </h3>
+
+
+            <div class="dato">
+
+                <span>
+                    Nº albarán
+                </span>
+
+                <strong
+                    id="numeroAlbaran"
+                >
+                    -
+                </strong>
+
+            </div>
+
+
+            <div class="dato">
+
+                <span>
+                    Cliente
+                </span>
+
+                <strong
+                    id="clienteAlbaran"
+                >
+                    -
+                </strong>
+
+            </div>
+
+
+            <div class="dato">
+
+                <span>
+                    Fecha
+                </span>
+
+                <strong
+                    id="fechaAlbaran"
+                >
+                    -
+                </strong>
+
+            </div>
+
+
+            <button
+                id="btnGuardarPendiente"
+                class="boton-principal"
+                type="button"
+            >
+                Guardar en pendientes
+            </button>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     PENDIENTES DE FIRMA
+===================================================== -->
+
+<main
+    id="pantallaPendientes"
+    class="pantalla oculto"
+>
+
+    <section class="panel">
+
+        <div class="barra-superior">
+
+            <button
+                id="btnVolverPendientes"
+                class="boton-volver"
+                type="button"
+            >
+                ← Volver
+            </button>
+
+            <h2>
+                Pendientes de firma
+            </h2>
+
+        </div>
+
+
+        <p
+            id="textoCantidadPendientes"
+            class="texto-cantidad"
+        >
+            0 albaranes pendientes
+        </p>
+
+
+        <div
+            id="listaPendientes"
+            class="lista-pendientes"
+        >
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     ALBARANES - LISTA DE CLIENTES
+===================================================== -->
+
+<main
+    id="pantallaClientes"
+    class="pantalla oculto"
+>
+
+    <section class="panel">
+
+        <div class="barra-superior">
+
+            <button
+                id="btnVolverClientes"
+                class="boton-volver"
+                type="button"
+            >
+                ← Volver
+            </button>
+
+
+            <div>
+
+                <h2>
+                    Albaranes
+                </h2>
+
+                <p class="subtitulo-pantalla">
+                    Clientes con albaranes firmados
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div
+            id="listaClientes"
+            class="lista-clientes"
+        >
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     ALBARANES DE UN CLIENTE
+===================================================== -->
+
+<main
+    id="pantallaAlbaranesCliente"
+    class="pantalla oculto"
+>
+
+    <section class="panel">
+
+        <div class="barra-superior">
+
+            <button
+                id="btnVolverAlbaranesCliente"
+                class="boton-volver"
+                type="button"
+            >
+                ← Volver
+            </button>
+
+
+            <div>
+
+                <h2
+                    id="tituloCliente"
+                >
+                    Cliente
+                </h2>
+
+                <p
+                    id="cantidadAlbaranesCliente"
+                    class="subtitulo-pantalla"
+                >
+                    Albaranes firmados
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div
+            id="listaAlbaranesCliente"
+            class="lista-albaranes-cliente"
+        >
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     VISOR PDF
+===================================================== -->
+
+<main
+    id="pantallaVisor"
+    class="pantalla pantalla-visor oculto"
+>
+
+    <section class="panel panel-visor">
+
+        <div class="barra-superior visor-cabecera">
+
+            <button
+                id="btnVolverVisor"
+                class="boton-volver"
+                type="button"
+            >
+                ← Volver
+            </button>
+
+
+            <div class="datos-visor">
+
+                <h2
+                    id="visorNumero"
+                >
+                    Albarán
+                </h2>
+
+                <p
+                    id="visorCliente"
+                >
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <div class="contenedor-pdf">
+
+            <iframe
+                id="iframePDF"
+                title="Albarán PDF"
+            >
+            </iframe>
+
+        </div>
+
+
+        <div
+            id="accionesVisor"
+            class="acciones-visor"
+        >
+
+            <button
+                id="btnFirmar"
+                class="boton-firmar"
+                type="button"
+            >
+                ✍️ Firmar albarán
+            </button>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<!-- =====================================================
+     PANTALLA DE FIRMA
+===================================================== -->
+
+<div
+    id="pantallaFirma"
+    class="pantalla-firma oculto"
+>
+
+    <div class="ventana-firma">
+
+        <div class="cabecera-firma">
+
+            <div>
+
+                <h2>
+                    Firma del cliente
+                </h2>
+
+                <p
+                    id="textoFirmaAlbaran"
+                >
+                    Albarán
+                </p>
+
+            </div>
+
+        </div>
+
+
+        <p class="instruccion-firma">
+            Firma con el dedo dentro del recuadro.
+        </p>
+
+
+        <div class="zona-firma">
+
+            <canvas
+                id="canvasFirma"
+            >
+            </canvas>
+
+        </div>
+
+
+        <p class="ayuda-firma">
+            La firma se colocará en la zona blanca
+            inferior del albarán.
+        </p>
+
+
+        <div class="acciones-firma">
+
+            <button
+                id="btnBorrarFirma"
+                class="boton-secundario"
+                type="button"
+            >
+                Borrar
+            </button>
+
+
+            <button
+                id="btnCancelarFirma"
+                class="boton-secundario"
+                type="button"
+            >
+                Cancelar
+            </button>
+
+
+            <button
+                id="btnConfirmarFirma"
+                class="boton-confirmar-firma"
+                type="button"
+            >
+                ✓ Confirmar firma
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     SELECCIONAR EMPRESA
+===================================================== -->
+
+<div
+    id="pantallaEmpresas"
+    class="pantalla-empresas oculto"
+>
+
+    <div class="ventana-empresas">
+
+        <h2>
+            Seleccionar empresa
+        </h2>
+
+        <p>
+            Elige la empresa con la que
+            quieres trabajar.
+        </p>
+
+
+        <div class="lista-empresas">
+
+
+            <button
+                class="opcion-empresa"
+                data-empresa="boqueron"
+                type="button"
+            >
+
+                <strong>
+                    Pescados y Mariscos
+                    El Boquerón
+                </strong>
+
+            </button>
+
+
+            <button
+                class="opcion-empresa"
+                data-empresa="empresa2"
+                type="button"
+            >
+
+                <strong>
+                    Empresa 2
+                </strong>
+
+            </button>
+
+        </div>
+
+
+        <button
+            id="btnCancelarEmpresa"
+            class="boton-secundario boton-cancelar-empresa"
+            type="button"
+        >
+            Cancelar
+        </button>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     JAVASCRIPT
+===================================================== -->
+
+<script
+    type="module"
+    src="app.js"
+></script>
+
+
+<!-- =====================================================
+     SERVICE WORKER
+===================================================== -->
+
+<script>
+
+    if ("serviceWorker" in navigator) {
+
+        window.addEventListener(
+            "load",
+            () => {
+
+                navigator.serviceWorker
+                    .register("./service-worker.js")
+                    .then(registro => {
+
+                        console.log(
+                            "Service Worker registrado:",
+                            registro.scope
+                        );
+
+                    })
+                    .catch(error => {
+
+                        console.error(
+                            "Error registrando Service Worker:",
+                            error
+                        );
+
+                    });
+
+            }
+        );
+
+    }
+
+</script>
+
+
+</body>
+
+</html>

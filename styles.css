@@ -1,0 +1,1146 @@
+/* =========================================================
+   GESTIÓN DE ALBARANES
+   STYLES.CSS COMPLETO
+========================================================= */
+
+
+/* =========================================================
+   GENERAL
+========================================================= */
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
+}
+
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f3f5f7;
+    color: #1d2733;
+}
+
+button {
+    font-family: inherit;
+    cursor: pointer;
+}
+
+.oculto {
+    display: none !important;
+}
+
+
+/* =========================================================
+   CABECERA
+========================================================= */
+
+.cabecera {
+    background: #ffffff;
+    border-bottom: 1px solid #dfe4e8;
+
+    padding: 14px 22px;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+
+    position: sticky;
+    top: 0;
+    z-index: 50;
+}
+
+
+.zona-cabecera-izquierda {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    min-width: 0;
+}
+
+
+.datos-cabecera {
+    min-width: 0;
+}
+
+
+.cabecera h1 {
+    margin: 0;
+    font-size: 24px;
+}
+
+
+.nombre-empresa {
+    margin: 5px 0 0;
+    color: #647180;
+    font-size: 14px;
+
+    overflow-wrap: anywhere;
+}
+
+
+/* =========================================================
+   BOTÓN INICIO
+========================================================= */
+
+.boton-inicio {
+    flex-shrink: 0;
+
+    border: 0;
+
+    background: #253b80;
+    color: #ffffff;
+
+    padding: 11px 15px;
+
+    border-radius: 10px;
+
+    font-size: 15px;
+    font-weight: 700;
+
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.10);
+}
+
+
+.boton-inicio:hover {
+    opacity: 0.92;
+}
+
+
+.boton-inicio:active {
+    transform: scale(0.98);
+}
+
+
+/* =========================================================
+   BOTÓN EMPRESA
+========================================================= */
+
+.boton-empresa {
+    flex-shrink: 0;
+
+    border: 1px solid #ccd3da;
+    background: #ffffff;
+    color: #263442;
+
+    padding: 10px 14px;
+    border-radius: 9px;
+
+    font-size: 14px;
+    font-weight: 700;
+}
+
+
+.boton-empresa:hover {
+    background: #f4f6f8;
+}
+
+
+/* =========================================================
+   PANTALLAS
+========================================================= */
+
+.pantalla {
+    width: 100%;
+    padding: 24px 16px;
+}
+
+
+.panel-principal,
+.panel {
+    width: 100%;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+
+.panel-principal h2 {
+    text-align: center;
+    margin: 12px 0 25px;
+}
+
+
+.subtitulo-pantalla {
+    margin: 4px 0 0;
+    color: #687582;
+    font-size: 14px;
+}
+
+
+/* =========================================================
+   MENÚ PRINCIPAL
+========================================================= */
+
+.menu-principal {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+}
+
+
+.boton-menu {
+    position: relative;
+
+    min-height: 170px;
+    padding: 25px 18px;
+
+    border: 1px solid #dce2e7;
+    border-radius: 16px;
+
+    background: #ffffff;
+    color: #25313d;
+
+    font-size: 18px;
+    font-weight: 700;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.05);
+
+    transition:
+        transform 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+
+.boton-menu:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 16px rgba(0, 0, 0, 0.08);
+}
+
+
+.icono-menu {
+    font-size: 38px;
+}
+
+
+.boton-anadir {
+    border-color: #b9d7c2;
+}
+
+
+.boton-pendientes {
+    border-color: #ecd59a;
+}
+
+
+.contador {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+
+    min-width: 29px;
+    height: 29px;
+
+    padding: 0 8px;
+
+    border-radius: 20px;
+
+    background: #d84040;
+    color: #ffffff;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 14px;
+    font-weight: 700;
+}
+
+
+/* =========================================================
+   BARRAS SUPERIORES
+========================================================= */
+
+.barra-superior {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+
+    margin-bottom: 22px;
+}
+
+
+.barra-superior h2 {
+    margin: 0;
+}
+
+
+.boton-volver {
+    flex-shrink: 0;
+
+    border: 1px solid #ccd3da;
+    background: #ffffff;
+
+    padding: 10px 14px;
+    border-radius: 9px;
+
+    color: #263442;
+
+    font-size: 15px;
+    font-weight: 700;
+}
+
+
+.boton-volver:hover {
+    background: #f4f6f8;
+}
+
+
+/* =========================================================
+   IMPORTACIÓN
+========================================================= */
+
+.empresa-destino {
+    background: #ffffff;
+    border: 1px solid #dce2e7;
+    border-radius: 12px;
+
+    padding: 15px 17px;
+    margin-bottom: 16px;
+
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+
+.estado-lectura {
+    background: #ffffff;
+    border: 1px solid #dce2e7;
+    border-radius: 12px;
+
+    padding: 15px 17px;
+    margin-bottom: 16px;
+}
+
+
+.estado-lectura p {
+    margin: 0;
+}
+
+
+#estadoLectura.error {
+    color: #b3261e;
+    font-weight: 700;
+}
+
+
+.datos-albaran {
+    background: #ffffff;
+    border: 1px solid #dce2e7;
+    border-radius: 14px;
+
+    padding: 20px;
+}
+
+
+.datos-albaran h3 {
+    margin-top: 0;
+}
+
+
+.dato {
+    padding: 13px 0;
+    border-bottom: 1px solid #edf0f2;
+
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 15px;
+}
+
+
+.dato span {
+    color: #687582;
+}
+
+
+.boton-principal {
+    width: 100%;
+
+    margin-top: 22px;
+    padding: 15px;
+
+    border: 0;
+    border-radius: 10px;
+
+    background: #166534;
+    color: #ffffff;
+
+    font-size: 17px;
+    font-weight: 700;
+}
+
+
+/* =========================================================
+   LISTAS
+========================================================= */
+
+.texto-cantidad {
+    color: #687582;
+    margin-bottom: 17px;
+}
+
+
+.lista-pendientes,
+.lista-albaranes-cliente {
+    display: grid;
+    gap: 14px;
+}
+
+
+/* =========================================================
+   TARJETAS DE ALBARÁN
+========================================================= */
+
+.tarjeta-albaran {
+    background: #ffffff;
+
+    border: 1px solid #dce2e7;
+    border-radius: 14px;
+
+    padding: 18px;
+
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+
+.fila-tarjeta {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 15px;
+}
+
+
+.numero-tarjeta {
+    margin: 0 0 6px;
+
+    font-size: 18px;
+    font-weight: 700;
+}
+
+
+.cliente-tarjeta {
+    margin: 0 0 5px;
+    font-weight: 600;
+}
+
+
+.fecha-tarjeta {
+    margin: 0;
+    color: #687582;
+    font-size: 14px;
+}
+
+
+.etiqueta-pendiente {
+    background: #fff4ce;
+    color: #7a5200;
+
+    padding: 6px 9px;
+    border-radius: 20px;
+
+    font-size: 12px;
+    font-weight: 700;
+
+    white-space: nowrap;
+}
+
+
+.etiqueta-firmado {
+    background: #e5f5e9;
+    color: #166534;
+
+    padding: 6px 10px;
+    border-radius: 20px;
+
+    font-size: 12px;
+    font-weight: 700;
+
+    white-space: nowrap;
+}
+
+
+.boton-abrir {
+    width: 100%;
+
+    margin-top: 16px;
+    padding: 12px;
+
+    border: 0;
+    border-radius: 9px;
+
+    background: #253b80;
+    color: #ffffff;
+
+    font-size: 15px;
+    font-weight: 700;
+}
+
+
+.boton-abrir:hover {
+    opacity: 0.92;
+}
+
+
+.sin-pendientes {
+    background: #ffffff;
+
+    border: 1px dashed #cbd2d9;
+    border-radius: 14px;
+
+    padding: 35px 20px;
+
+    text-align: center;
+    color: #687582;
+}
+
+
+/* =========================================================
+   LISTA DE CLIENTES
+========================================================= */
+
+.lista-clientes {
+    display: grid;
+    gap: 12px;
+}
+
+
+.tarjeta-cliente {
+    width: 100%;
+
+    border: 1px solid #dce2e7;
+    border-radius: 14px;
+
+    background: #ffffff;
+    color: #25313d;
+
+    padding: 18px;
+
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 15px;
+
+    text-align: left;
+
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+
+    transition:
+        transform 0.15s ease,
+        box-shadow 0.15s ease;
+}
+
+
+.tarjeta-cliente:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+
+.icono-cliente {
+    width: 46px;
+    height: 46px;
+
+    border-radius: 50%;
+
+    background: #eef2f6;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 24px;
+}
+
+
+.datos-cliente {
+    min-width: 0;
+
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+
+.datos-cliente strong {
+    font-size: 17px;
+    overflow-wrap: anywhere;
+}
+
+
+.datos-cliente small {
+    color: #687582;
+    font-size: 13px;
+}
+
+
+.flecha-cliente {
+    color: #75818c;
+    font-size: 32px;
+    line-height: 1;
+}
+
+
+/* =========================================================
+   VISOR PDF
+========================================================= */
+
+.pantalla-visor {
+    padding-bottom: 110px;
+}
+
+
+.panel-visor {
+    max-width: 1100px;
+}
+
+
+.visor-cabecera {
+    align-items: flex-start;
+}
+
+
+.datos-visor {
+    min-width: 0;
+}
+
+
+.datos-visor h2 {
+    margin: 0 0 4px;
+}
+
+
+.datos-visor p {
+    margin: 0;
+
+    color: #687582;
+
+    overflow-wrap: anywhere;
+}
+
+
+.contenedor-pdf {
+    width: 100%;
+    height: 70vh;
+
+    min-height: 500px;
+
+    background: #525659;
+
+    border-radius: 12px;
+
+    overflow: hidden;
+
+    border: 1px solid #cbd2d9;
+}
+
+
+#iframePDF {
+    width: 100%;
+    height: 100%;
+
+    border: 0;
+    background: #ffffff;
+}
+
+
+.acciones-visor {
+    position: fixed;
+
+    bottom: 0;
+    left: 0;
+    right: 0;
+
+    z-index: 40;
+
+    padding: 12px 16px;
+
+    background: rgba(255, 255, 255, 0.96);
+
+    border-top: 1px solid #dce2e7;
+
+    display: flex;
+    justify-content: center;
+}
+
+
+.boton-firmar {
+    width: 100%;
+    max-width: 600px;
+
+    border: 0;
+    border-radius: 11px;
+
+    padding: 15px 20px;
+
+    background: #166534;
+    color: #ffffff;
+
+    font-size: 18px;
+    font-weight: 700;
+}
+
+
+/* =========================================================
+   FIRMA
+========================================================= */
+
+.pantalla-firma {
+    position: fixed;
+    inset: 0;
+
+    z-index: 1000;
+
+    background: rgba(15, 23, 32, 0.72);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 18px;
+}
+
+
+.ventana-firma {
+    width: 100%;
+    max-width: 850px;
+
+    max-height: 95vh;
+    overflow-y: auto;
+
+    background: #ffffff;
+
+    border-radius: 18px;
+
+    padding: 22px;
+
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.3);
+}
+
+
+.cabecera-firma {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 15px;
+}
+
+
+.cabecera-firma h2 {
+    margin: 0 0 5px;
+}
+
+
+.cabecera-firma p {
+    margin: 0;
+    color: #687582;
+}
+
+
+.instruccion-firma {
+    margin: 20px 0 10px;
+    font-weight: 700;
+}
+
+
+.zona-firma {
+    width: 100%;
+    height: 280px;
+
+    border: 3px dashed #9ba7b2;
+    border-radius: 14px;
+
+    background: #ffffff;
+
+    overflow: hidden;
+
+    position: relative;
+}
+
+
+#canvasFirma {
+    display: block;
+
+    width: 100%;
+    height: 100%;
+
+    background: transparent;
+
+    cursor: crosshair;
+
+    touch-action: none;
+}
+
+
+.ayuda-firma {
+    margin: 10px 0 0;
+
+    color: #687582;
+    font-size: 13px;
+}
+
+
+.acciones-firma {
+    margin-top: 20px;
+
+    display: grid;
+    grid-template-columns: 1fr 1fr 2fr;
+    gap: 10px;
+}
+
+
+.boton-secundario {
+    border: 1px solid #cbd2d9;
+
+    background: #ffffff;
+    color: #263442;
+
+    border-radius: 10px;
+
+    padding: 13px 15px;
+
+    font-size: 15px;
+    font-weight: 700;
+}
+
+
+.boton-confirmar-firma {
+    border: 0;
+
+    background: #166534;
+    color: #ffffff;
+
+    border-radius: 10px;
+
+    padding: 13px 15px;
+
+    font-size: 16px;
+    font-weight: 700;
+}
+
+
+.boton-confirmar-firma:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+
+/* =========================================================
+   SELECCIÓN DE EMPRESA
+========================================================= */
+
+.pantalla-empresas {
+    position: fixed;
+    inset: 0;
+
+    z-index: 1100;
+
+    background: rgba(15, 23, 32, 0.72);
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 18px;
+}
+
+
+.ventana-empresas {
+    width: 100%;
+    max-width: 520px;
+
+    background: #ffffff;
+
+    border-radius: 17px;
+
+    padding: 24px;
+
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.3);
+}
+
+
+.ventana-empresas h2 {
+    margin-top: 0;
+}
+
+
+.lista-empresas {
+    display: grid;
+    gap: 12px;
+
+    margin: 22px 0;
+}
+
+
+.opcion-empresa {
+    width: 100%;
+
+    padding: 18px;
+
+    border: 2px solid #dce2e7;
+    border-radius: 12px;
+
+    background: #ffffff;
+    color: #25313d;
+
+    text-align: left;
+
+    font-size: 16px;
+}
+
+
+.opcion-empresa.activa {
+    border-color: #166534;
+    background: #f0f8f3;
+}
+
+
+.boton-cancelar-empresa {
+    width: 100%;
+}
+
+
+/* =========================================================
+   TABLET / MÓVIL
+========================================================= */
+
+@media (max-width: 700px) {
+
+    .cabecera {
+        padding: 10px 11px;
+        gap: 8px;
+    }
+
+
+    .zona-cabecera-izquierda {
+        gap: 9px;
+    }
+
+
+    .cabecera h1 {
+        font-size: 17px;
+    }
+
+
+    .nombre-empresa {
+        font-size: 11px;
+        margin-top: 3px;
+    }
+
+
+    .boton-inicio {
+        padding: 9px 10px;
+
+        font-size: 13px;
+    }
+
+
+    .boton-empresa {
+        padding: 9px 9px;
+        font-size: 11px;
+    }
+
+
+    .pantalla {
+        padding: 17px 12px;
+    }
+
+
+    .menu-principal {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+
+    .boton-menu {
+        min-height: 105px;
+
+        flex-direction: row;
+        justify-content: flex-start;
+
+        font-size: 17px;
+
+        padding: 18px;
+    }
+
+
+    .icono-menu {
+        font-size: 31px;
+    }
+
+
+    .barra-superior {
+        gap: 10px;
+        align-items: flex-start;
+    }
+
+
+    .barra-superior h2 {
+        font-size: 20px;
+    }
+
+
+    .dato {
+        grid-template-columns: 1fr;
+        gap: 5px;
+    }
+
+
+    .tarjeta-cliente {
+        padding: 15px;
+    }
+
+
+    .icono-cliente {
+        width: 42px;
+        height: 42px;
+
+        font-size: 21px;
+    }
+
+
+    .datos-cliente strong {
+        font-size: 15px;
+    }
+
+
+    .contenedor-pdf {
+        height: 67vh;
+        min-height: 430px;
+    }
+
+
+    .pantalla-firma {
+        padding: 8px;
+    }
+
+
+    .ventana-firma {
+        padding: 15px;
+        border-radius: 14px;
+    }
+
+
+    .cabecera-firma h2 {
+        font-size: 21px;
+    }
+
+
+    .zona-firma {
+        height: 250px;
+    }
+
+
+    .acciones-firma {
+        grid-template-columns: 1fr 1fr;
+    }
+
+
+    .boton-confirmar-firma {
+        grid-column: 1 / -1;
+
+        padding: 15px;
+
+        font-size: 17px;
+    }
+
+}
+
+
+/* =========================================================
+   TELÉFONOS PEQUEÑOS
+========================================================= */
+
+@media (max-width: 430px) {
+
+    .cabecera {
+        align-items: center;
+    }
+
+
+    .zona-cabecera-izquierda {
+        flex: 1;
+        min-width: 0;
+    }
+
+
+    .datos-cabecera {
+        flex: 1;
+        min-width: 0;
+    }
+
+
+    .cabecera h1 {
+        font-size: 15px;
+
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+
+    .nombre-empresa {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
+        max-width: 150px;
+    }
+
+
+    .boton-inicio {
+        padding: 9px;
+
+        font-size: 0;
+    }
+
+
+    .boton-inicio::first-letter {
+        font-size: 20px;
+    }
+
+
+    .boton-empresa {
+        max-width: 92px;
+        font-size: 10px;
+    }
+
+
+    .zona-firma {
+        height: 220px;
+    }
+
+
+    .fila-tarjeta {
+        flex-direction: column;
+    }
+
+
+    .tarjeta-cliente {
+        grid-template-columns: auto 1fr auto;
+        gap: 10px;
+    }
+
+
+    .flecha-cliente {
+        font-size: 27px;
+    }
+
+}
+
+
+/* =========================================================
+   FIN
+========================================================= */
