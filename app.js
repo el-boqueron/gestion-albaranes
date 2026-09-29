@@ -128,6 +128,215 @@ async function probarConexionGoogleDrive() {
         '<span class="icono-menu">☁️</span><span>Google Drive conectado ✓</span>';
 }
 
+
+/* =========================================================
+   GOOGLE DRIVE - GUARDAR ALBARANES FIRMADOS
+========================================================= */
+
+function escaparConsultaDrive(valor) {
+    return String(valor)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+}
+
+function limpiarNombreDrive(valor) {
+    return String(valor || "Sin nombre")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim() || "Sin nombre";
+}
+
+async function peticionDrive(url, opciones = {}) {
+    if (!googleAccessToken) {
+        throw new Error("Google Drive no está conectado.");
+    }
+
+    const headers = new Headers(opciones.headers || {});
+    headers.set("Authorization", "Bearer " + googleAccessToken);
+
+    const respuesta = await fetch(url, {
+        ...opciones,
+        headers
+    });
+
+    if (respuesta.status === 401) {
+        googleAccessToken = null;
+        estadoGoogleDrive.textContent = "Google Drive: sesión caducada";
+        btnGoogleDrive.innerHTML =
+            '<span class="icono-menu">☁️</span><span>Conectar Google Drive</span>';
+    }
+
+    return respuesta;
+}
+
+async function buscarCarpetaDrive(nombre, parentId = "root") {
+    const q = [
+        `name = '${escaparConsultaDrive(nombre)}'`,
+        "mimeType = 'application/vnd.google-apps.folder'",
+        "trashed = false",
+        `'${escaparConsultaDrive(parentId)}' in parents`
+    ].join(" and ");
+
+    const url =
+        "https://www.googleapis.com/drive/v3/files?q=" +
+        encodeURIComponent(q) +
+        "&fields=files(id,name)&pageSize=10";
+
+    const respuesta = await peticionDrive(url);
+
+    if (!respuesta.ok) {
+        throw new Error("No se pudo buscar la carpeta en Google Drive: " + await respuesta.text());
+    }
+
+    const datos = await respuesta.json();
+    return datos.files?.[0] || null;
+}
+
+async function crearCarpetaDrive(nombre, parentId = "root") {
+    const respuesta = await peticionDrive(
+        "https://www.googleapis.com/drive/v3/files?fields=id,name",
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                name: nombre,
+                mimeType: "application/vnd.google-apps.folder",
+                parents: [parentId]
+            })
+        }
+    );
+
+    if (!respuesta.ok) {
+        throw new Error("No se pudo crear la carpeta en Google Drive: " + await respuesta.text());
+    }
+
+    return respuesta.json();
+}
+
+async function obtenerOCrearCarpetaDrive(nombre, parentId = "root") {
+    const nombreLimpio = limpiarNombreDrive(nombre);
+    const existente = await buscarCarpetaDrive(nombreLimpio, parentId);
+    if (existente) return existente.id;
+
+    const creada = await crearCarpetaDrive(nombreLimpio, parentId);
+    return creada.id;
+}
+
+async function buscarPDFDrive(nombre, parentId) {
+    const q = [
+        `name = '${escaparConsultaDrive(nombre)}'`,
+        "mimeType = 'application/pdf'",
+        "trashed = false",
+        `'${escaparConsultaDrive(parentId)}' in parents`
+    ].join(" and ");
+
+    const url =
+        "https://www.googleapis.com/drive/v3/files?q=" +
+        encodeURIComponent(q) +
+        "&fields=files(id,name)&pageSize=10";
+
+    const respuesta = await peticionDrive(url);
+
+    if (!respuesta.ok) {
+        throw new Error("No se pudo buscar el PDF en Google Drive: " + await respuesta.text());
+    }
+
+    const datos = await respuesta.json();
+    return datos.files?.[0] || null;
+}
+
+async function subirPDFDrive(albaran) {
+    if (!googleAccessToken) {
+        return { subido: false, motivo: "sin_conexion" };
+    }
+
+    const empresa = EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa";
+    const cliente = albaran.cliente || "Cliente sin nombre";
+
+    const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
+    const carpetaEmpresa = await obtenerOCrearCarpetaDrive(empresa, carpetaRaiz);
+    const carpetaCliente = await obtenerOCrearCarpetaDrive(cliente, carpetaEmpresa);
+
+    const nombrePDF = limpiarNombreDrive(albaran.numero || "Albarán") + ".pdf";
+    const bytesPDF = dataURLAUint8Array(albaran.pdf);
+    const archivoExistente = await buscarPDFDrive(nombrePDF, carpetaCliente);
+
+    let respuesta;
+
+    if (archivoExistente) {
+        respuesta = await peticionDrive(
+            `https://www.googleapis.com/upload/drive/v3/files/${archivoExistente.id}?uploadType=media&fields=id,name,webViewLink`,
+            {
+                method: "PATCH",
+                headers: { "Content-Type": "application/pdf" },
+                body: bytesPDF
+            }
+        );
+    }
+    else {
+        const separador = "gestion_albaranes_" + Date.now();
+        const metadata = {
+            name: nombrePDF,
+            mimeType: "application/pdf",
+            parents: [carpetaCliente]
+        };
+
+        const cuerpo = new Blob([
+            `--${separador}\r\n`,
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n",
+            JSON.stringify(metadata),
+            `\r\n--${separador}\r\n`,
+            "Content-Type: application/pdf\r\n\r\n",
+            bytesPDF,
+            `\r\n--${separador}--`
+        ]);
+
+        respuesta = await peticionDrive(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink",
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": `multipart/related; boundary=${separador}`
+                },
+                body: cuerpo
+            }
+        );
+    }
+
+    if (!respuesta.ok) {
+        throw new Error("No se pudo subir el PDF a Google Drive: " + await respuesta.text());
+    }
+
+    const archivoDrive = await respuesta.json();
+    return {
+        subido: true,
+        id: archivoDrive.id,
+        nombre: archivoDrive.name,
+        enlace: archivoDrive.webViewLink || ""
+    };
+}
+
+async function registrarSubidaDrive(albaran, resultado) {
+    if (!resultado?.subido) return;
+
+    const albaranes = obtenerAlbaranes();
+    const indice = albaranes.findIndex(item =>
+        item.id === albaran.id && item.empresa === albaran.empresa
+    );
+
+    if (indice === -1) return;
+
+    albaranes[indice].driveFileId = resultado.id;
+    albaranes[indice].driveNombre = resultado.nombre;
+    albaranes[indice].driveEnlace = resultado.enlace;
+    albaranes[indice].fechaSubidaDrive = new Date().toISOString();
+    guardarAlbaranes(albaranes);
+
+    if (albaranAbierto && albaranAbierto.id === albaran.id) {
+        albaranAbierto = albaranes[indice];
+    }
+}
+
 btnGoogleDrive.addEventListener("click", async () => {
     btnGoogleDrive.disabled = true;
 
@@ -5356,6 +5565,30 @@ btnConfirmarFirma.addEventListener(
 
 
 
+            let mensajeDrive = "";
+
+            if (googleAccessToken) {
+                btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
+
+                try {
+                    const resultadoDrive = await subirPDFDrive(albaranAbierto);
+                    await registrarSubidaDrive(albaranAbierto, resultadoDrive);
+
+                    if (resultadoDrive.subido) {
+                        mensajeDrive = "\nGuardado también en Google Drive.";
+                    }
+                }
+                catch (errorDrive) {
+                    console.error("Error subiendo a Google Drive:", errorDrive);
+                    mensajeDrive = "\nEl PDF quedó guardado en la aplicación, pero no se pudo subir a Google Drive.";
+                }
+            }
+            else {
+                mensajeDrive = "\nEl PDF quedó guardado en la aplicación. Conecta Google Drive para subir los próximos automáticamente.";
+            }
+
+
+
 
 
             cerrarPantallaFirma();
@@ -5394,7 +5627,9 @@ btnConfirmarFirma.addEventListener(
 
                 numeroFirmado +
 
-                " firmado correctamente."
+                " firmado correctamente." +
+
+                mensajeDrive
 
             );
 
