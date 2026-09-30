@@ -378,6 +378,7 @@ async function registrarSubidaDrive(albaran, resultado) {
     albaranes[indice].driveNombre = resultado.nombre;
     albaranes[indice].driveEnlace = resultado.enlace;
     albaranes[indice].fechaSubidaDrive = new Date().toISOString();
+    albaranes[indice].pendienteSubidaDrive = false;
     albaranes[indice].updatedAt = new Date().toISOString();
     guardarAlbaranes(albaranes);
 
@@ -477,11 +478,47 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
     return respuesta.json();
 }
 
+async function subirFirmadosPendientesDrive() {
+
+    const pendientes = obtenerAlbaranes().filter(
+        albaran =>
+            albaran
+            &&
+            albaran.estado === "firmado"
+            &&
+            albaran.pendienteSubidaDrive === true
+            &&
+            albaran.pdf
+    );
+
+    for (const albaran of pendientes) {
+
+        try {
+            const resultado = await subirPDFDrive(albaran);
+            await registrarSubidaDrive(albaran, resultado);
+        }
+        catch (error) {
+            console.error(
+                "PDF firmado pendiente de sincronizar:",
+                albaran.numero,
+                error
+            );
+        }
+
+    }
+
+}
+
+
+
 async function sincronizarConGoogleDrive() {
     if (sincronizacionEnCurso || !obtenerTokenSesionApp()) return;
     sincronizacionEnCurso = true;
     try {
         if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
+
+        await subirFirmadosPendientesDrive();
+
         const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
         const archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
         const remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
@@ -6259,6 +6296,10 @@ btnConfirmarFirma.addEventListener(
             let mensajeDrive = "";
             btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
 
+            albaranes[indice].pendienteSubidaDrive = true;
+            albaranes[indice].updatedAt = new Date().toISOString();
+            guardarAlbaranes(albaranes);
+
             try {
                 const resultadoDrive = await subirPDFDrive(albaranAbierto);
                 await registrarSubidaDrive(albaranAbierto, resultadoDrive);
@@ -7129,5 +7170,18 @@ function escaparHTML(valor) {
    FIN APP.JS
 
 ========================================================= */
+
+window.addEventListener("online", () => {
+
+    setTimeout(
+        () => {
+            sincronizarConGoogleDrive();
+        },
+        1000
+    );
+
+});
+
+
 
 window.addEventListener("DOMContentLoaded", () => { iniciarAccesoPrivado(); });
