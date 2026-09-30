@@ -181,6 +181,7 @@
         <div id="menuSuperior" class="menu-superior oculto">
             <button id="btnConfiguracion" type="button">⚙️ Configuración</button>
             <button id="btnGoogleDrive" type="button">☁️ Conectar Google Drive</button>
+            <button id="btnCopiaSeguridad" type="button">💾 Copia de seguridad</button>
             <button id="btnCerrarSesion" type="button">🚪 Cerrar sesión</button>
         </div>
     </div>
@@ -1406,6 +1407,43 @@
     </div>
 </div>
 
+
+
+<!-- =====================================================
+     COPIA DE SEGURIDAD Y LIBERAR DRIVE
+===================================================== -->
+
+<div id="pantallaCopiaSeguridad" class="pantalla-empresas oculto">
+    <div class="ventana-empresas ventana-copia-seguridad">
+        <h2>💾 Copia de seguridad</h2>
+        <p>
+            Descarga un ZIP con todos los albaranes firmados,
+            organizados por autónomo y cliente.
+        </p>
+
+        <div class="aviso-copia-seguridad">
+            Primero crea y comprueba la copia. Después podrás liberar
+            espacio eliminando de Drive y de la aplicación los albaranes
+            firmados incluidos en esa copia.
+        </div>
+
+        <p id="estadoCopiaSeguridad" class="estado-copia-seguridad"></p>
+
+        <div class="acciones-copia-seguridad">
+            <button id="btnCrearCopiaSeguridad" class="boton-principal" type="button">
+                ⬇️ Crear copia local ZIP
+            </button>
+
+            <button id="btnLiberarEspacioDrive" class="boton-peligro" type="button" disabled>
+                🗑️ Liberar espacio de Drive
+            </button>
+
+            <button id="btnCerrarCopiaSeguridad" class="boton-secundario" type="button">
+                Cerrar
+            </button>
+        </div>
+    </div>
+</div>
 
 <!-- =====================================================
 

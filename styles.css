@@ -1396,3 +1396,55 @@ button {
 .tarjeta-albaran .etiqueta-pendiente {
     margin-right: 4px;
 }
+
+
+/* =========================================================
+   V22 - COPIA DE SEGURIDAD
+========================================================= */
+
+.ventana-copia-seguridad {
+    max-width: 620px;
+}
+
+.aviso-copia-seguridad {
+    margin: 18px 0;
+    padding: 15px 17px;
+    border: 1px solid #dce2e7;
+    border-radius: 12px;
+    background: #f7f9fb;
+    line-height: 1.5;
+}
+
+.estado-copia-seguridad {
+    min-height: 24px;
+    margin: 14px 0;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+
+.acciones-copia-seguridad {
+    display: grid;
+    gap: 11px;
+}
+
+.acciones-copia-seguridad .boton-principal {
+    margin-top: 0;
+}
+
+.boton-peligro {
+    width: 100%;
+    padding: 14px 16px;
+    border: 0;
+    border-radius: 10px;
+    background: #b42318;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.boton-peligro:disabled,
+.acciones-copia-seguridad button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+

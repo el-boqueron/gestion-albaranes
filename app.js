@@ -8,6 +8,8 @@
 
 
 
+import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
+
 import * as pdfjsLib from
 
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs";
@@ -704,6 +706,27 @@ const nombreAutonomo1 =
 
 const nombreAutonomo2 =
     document.getElementById("nombreAutonomo2");
+
+const btnCopiaSeguridad =
+    document.getElementById("btnCopiaSeguridad");
+
+const pantallaCopiaSeguridad =
+    document.getElementById("pantallaCopiaSeguridad");
+
+const btnCrearCopiaSeguridad =
+    document.getElementById("btnCrearCopiaSeguridad");
+
+const btnLiberarEspacioDrive =
+    document.getElementById("btnLiberarEspacioDrive");
+
+const btnCerrarCopiaSeguridad =
+    document.getElementById("btnCerrarCopiaSeguridad");
+
+const estadoCopiaSeguridad =
+    document.getElementById("estadoCopiaSeguridad");
+
+let idsUltimaCopiaSeguridad = [];
+
 
 
 
@@ -3788,6 +3811,330 @@ function convertirArchivoBase64(
 }
 
 
+
+
+
+
+/* =========================================================
+   COPIA DE SEGURIDAD + LIBERAR ESPACIO
+========================================================= */
+
+function nombreSeguroArchivo(valor) {
+    return String(valor || "Sin nombre")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .replace(/\s+/g, " ")
+        .trim() || "Sin nombre";
+}
+
+function fechaNombreCopia() {
+    const ahora = new Date();
+    const dos = valor => String(valor).padStart(2, "0");
+    return [
+        ahora.getFullYear(),
+        dos(ahora.getMonth() + 1),
+        dos(ahora.getDate())
+    ].join("-")
+    + "_"
+    + [
+        dos(ahora.getHours()),
+        dos(ahora.getMinutes())
+    ].join("-");
+}
+
+function descargarBlob(blob, nombre) {
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = nombre;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
+
+function albaranesFirmadosParaCopia() {
+    return obtenerAlbaranes().filter(
+        albaran =>
+            albaran
+            &&
+            albaran.estado === "firmado"
+            &&
+            albaran.pdf
+    );
+}
+
+async function crearCopiaSeguridadLocal() {
+    const firmados = albaranesFirmadosParaCopia();
+
+    if (!firmados.length) {
+        alert("No hay albaranes firmados para incluir en la copia.");
+        return;
+    }
+
+    btnCrearCopiaSeguridad.disabled = true;
+    btnLiberarEspacioDrive.disabled = true;
+    estadoCopiaSeguridad.textContent = "Creando copia de seguridad...";
+
+    try {
+        const zip = new JSZip();
+
+        for (const albaran of firmados) {
+            const empresa =
+                nombreSeguroArchivo(
+                    EMPRESAS[albaran.empresa]?.nombre
+                    || albaran.empresa
+                    || "Empresa"
+                );
+
+            const cliente =
+                nombreSeguroArchivo(
+                    albaran.cliente || "Cliente sin nombre"
+                );
+
+            const numero =
+                nombreSeguroArchivo(
+                    albaran.numero || "Albarán"
+                );
+
+            const bytes = dataURLAUint8Array(albaran.pdf);
+
+            zip.file(
+                `${empresa}/${cliente}/${numero}.pdf`,
+                bytes
+            );
+        }
+
+        const resumen = {
+            creado: new Date().toISOString(),
+            cantidad: firmados.length,
+            albaranes: firmados.map(albaran => ({
+                empresa:
+                    EMPRESAS[albaran.empresa]?.nombre
+                    || albaran.empresa
+                    || "Empresa",
+                cliente: albaran.cliente || "",
+                numero: albaran.numero || "",
+                fecha: albaran.fecha || "",
+                fechaFirma: albaran.fechaFirma || ""
+            }))
+        };
+
+        zip.file(
+            "resumen-copia.json",
+            JSON.stringify(resumen, null, 2)
+        );
+
+        const blob = await zip.generateAsync({
+            type: "blob",
+            compression: "DEFLATE",
+            compressionOptions: { level: 6 }
+        });
+
+        descargarBlob(
+            blob,
+            `copia-albaranes-${fechaNombreCopia()}.zip`
+        );
+
+        idsUltimaCopiaSeguridad = firmados.map(
+            albaran => `${albaran.empresa || "boqueron"}::${albaran.id}`
+        );
+
+        btnLiberarEspacioDrive.disabled = false;
+        estadoCopiaSeguridad.textContent =
+            `Copia creada: ${firmados.length} albarán(es). Comprueba el ZIP antes de liberar espacio.`;
+    }
+    catch (error) {
+        console.error("Error creando copia:", error);
+        idsUltimaCopiaSeguridad = [];
+        estadoCopiaSeguridad.textContent =
+            "No se pudo crear la copia de seguridad.";
+        alert("No se pudo crear la copia. No se ha borrado nada.");
+    }
+    finally {
+        btnCrearCopiaSeguridad.disabled = false;
+    }
+}
+
+async function borrarArchivoDrivePorId(fileId) {
+    if (!fileId) return;
+
+    const respuesta = await peticionDrive(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,
+        { method: "DELETE" }
+    );
+
+    if (!respuesta.ok && respuesta.status !== 404) {
+        throw new Error(
+            "No se pudo borrar un PDF de Google Drive: "
+            + await respuesta.text()
+        );
+    }
+}
+
+async function localizarPDFDriveAlbaran(albaran) {
+    const empresa =
+        EMPRESAS[albaran.empresa]?.nombre
+        || albaran.empresa
+        || "Empresa";
+
+    const carpetaRaiz =
+        await buscarCarpetaDrive("Gestión de Albaranes");
+
+    if (!carpetaRaiz) return null;
+
+    const carpetaEmpresa =
+        await buscarCarpetaDrive(empresa, carpetaRaiz.id);
+
+    if (!carpetaEmpresa) return null;
+
+    const carpetaCliente =
+        await buscarCarpetaDrive(
+            albaran.cliente || "Cliente sin nombre",
+            carpetaEmpresa.id
+        );
+
+    if (!carpetaCliente) return null;
+
+    const nombrePDF =
+        limpiarNombreDrive(albaran.numero || "Albarán") + ".pdf";
+
+    return buscarPDFDrive(nombrePDF, carpetaCliente.id);
+}
+
+async function liberarEspacioDriveTrasCopia() {
+    if (!idsUltimaCopiaSeguridad.length) {
+        alert("Primero crea una copia de seguridad en esta sesión.");
+        return;
+    }
+
+    const albaranes = obtenerAlbaranes();
+
+    const incluidos = albaranes.filter(albaran =>
+        idsUltimaCopiaSeguridad.includes(
+            `${albaran.empresa || "boqueron"}::${albaran.id}`
+        )
+        &&
+        albaran.estado === "firmado"
+    );
+
+    if (!incluidos.length) {
+        alert("No quedan albaranes de esa copia para eliminar.");
+        return;
+    }
+
+    const confirmado = confirm(
+        `Vas a eliminar ${incluidos.length} albarán(es) firmados de Google Drive y de la aplicación.\n\n`
+        + "Comprueba antes que el ZIP se ha descargado correctamente.\n\n"
+        + "Esta acción no se puede deshacer desde la aplicación.\n\n"
+        + "¿Continuar?"
+    );
+
+    if (!confirmado) return;
+
+    btnLiberarEspacioDrive.disabled = true;
+    btnCrearCopiaSeguridad.disabled = true;
+    estadoCopiaSeguridad.textContent =
+        "Liberando espacio. No cierres la aplicación...";
+
+    try {
+        if (!googleAccessToken) {
+            await obtenerTokenGoogleDesdeWorker();
+        }
+
+        for (const albaran of incluidos) {
+            let fileId = albaran.driveFileId || "";
+
+            if (!fileId) {
+                const encontrado =
+                    await localizarPDFDriveAlbaran(albaran);
+                fileId = encontrado?.id || "";
+            }
+
+            if (fileId) {
+                await borrarArchivoDrivePorId(fileId);
+            }
+        }
+
+        const ahora = new Date().toISOString();
+        const claves = new Set(
+            incluidos.map(
+                albaran =>
+                    `${albaran.empresa || "boqueron"}::${albaran.numero || albaran.id}`
+            )
+        );
+
+        const actualizados = albaranes.map(albaran => {
+            const clave =
+                `${albaran.empresa || "boqueron"}::${albaran.numero || albaran.id}`;
+
+            if (!claves.has(clave)) return albaran;
+
+            return {
+                id: albaran.id,
+                numero: albaran.numero,
+                cliente: albaran.cliente,
+                fecha: albaran.fecha,
+                empresa: albaran.empresa || "boqueron",
+                estado: "eliminado",
+                eliminadoAt: ahora,
+                motivoEliminacion: "copia_seguridad",
+                updatedAt: ahora
+            };
+        });
+
+        guardarAlbaranes(actualizados);
+        await sincronizarConGoogleDrive();
+
+        idsUltimaCopiaSeguridad = [];
+        actualizarContadorPendientes();
+
+        if (!pantallaClientes.classList.contains("oculto")) {
+            mostrarClientes();
+        }
+
+        estadoCopiaSeguridad.textContent =
+            `Espacio liberado: ${incluidos.length} albarán(es) eliminados de Drive y de la aplicación.`;
+
+        alert(
+            "Espacio liberado correctamente.\n\n"
+            + "La copia ZIP queda como archivo histórico."
+        );
+    }
+    catch (error) {
+        console.error("Error liberando espacio:", error);
+        estadoCopiaSeguridad.textContent =
+            "No se pudo completar el borrado. No vuelvas a borrar hasta revisar la conexión.";
+        alert(
+            "No se pudo completar la liberación de espacio.\n\n"
+            + "La copia local no se ha modificado."
+        );
+    }
+    finally {
+        btnCrearCopiaSeguridad.disabled = false;
+    }
+}
+
+btnCopiaSeguridad.addEventListener("click", () => {
+    menuSuperior.classList.add("oculto");
+    idsUltimaCopiaSeguridad = [];
+    btnLiberarEspacioDrive.disabled = true;
+    estadoCopiaSeguridad.textContent = "";
+    pantallaCopiaSeguridad.classList.remove("oculto");
+});
+
+btnCerrarCopiaSeguridad.addEventListener("click", () => {
+    pantallaCopiaSeguridad.classList.add("oculto");
+});
+
+btnCrearCopiaSeguridad.addEventListener(
+    "click",
+    crearCopiaSeguridadLocal
+);
+
+btnLiberarEspacioDrive.addEventListener(
+    "click",
+    liberarEspacioDriveTrasCopia
+);
 
 
 
