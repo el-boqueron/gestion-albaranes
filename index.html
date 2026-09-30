@@ -88,6 +88,30 @@
 
 
 
+<div id="pantallaLogin" class="pantalla-login">
+    <form id="formLogin" class="login-card">
+        <h1>Gestión de Albaranes</h1>
+        <p>Acceso privado</p>
+        <label for="loginUsuario">Usuario</label>
+        <input id="loginUsuario" type="text" autocomplete="username" required>
+        <label for="loginPassword">Contraseña</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" required>
+        <button id="btnLogin" type="submit">Iniciar sesión</button>
+        <p id="estadoLogin" class="estado-login"></p>
+    </form>
+</div>
+
+<div id="pantallaAccesoUsuario" class="pantalla-acceso-usuario oculto">
+    <div class="acceso-usuario-contenido">
+        <h1>Gestión de Albaranes</h1>
+        <p>Selecciona el usuario para iniciar</p>
+        <div class="acceso-usuario-botones">
+            <button id="btnAccesoRobinson" type="button">Robinson Rojas Bustos</button>
+            <button id="btnAccesoCarlos" type="button">Carlos Eduardo</button>
+        </div>
+    </div>
+</div>
+
 <header class="cabecera">
 
 
@@ -136,7 +160,7 @@
 
             >
 
-                Pescados y Mariscos El Boquerón
+                Carlos Eduardo
 
             </p>
 
@@ -152,19 +176,14 @@
 
 
 
-    <button
-
-        id="btnCambiarEmpresa"
-
-        class="boton-empresa"
-
-        type="button"
-
-    >
-
-        Cambiar empresa
-
-    </button>
+    <div class="menu-superior-contenedor">
+        <button id="btnCambiarEmpresa" class="boton-tres-puntos" type="button" aria-label="Abrir menú" title="Menú">⋮</button>
+        <div id="menuSuperior" class="menu-superior oculto">
+            <button id="btnConfiguracion" type="button">⚙️ Configuración</button>
+            <button id="btnGoogleDrive" type="button">☁️ Conectar Google Drive</button>
+            <button id="btnCerrarSesion" type="button">🚪 Cerrar sesión</button>
+        </div>
+    </div>
 
 
 
@@ -195,6 +214,11 @@
     <section class="panel-principal">
 
 
+
+        <div class="selector-usuarios-inicio">
+            <button id="btnUsuarioRobinson" class="boton-usuario-inicio" type="button">Robinson Rojas Bustos</button>
+            <button id="btnUsuarioCarlos" class="boton-usuario-inicio" type="button">Carlos Eduardo</button>
+        </div>
 
         <h2>
 
@@ -328,11 +352,6 @@
 
         
 
-            <button id="btnGoogleDrive" class="boton-menu" type="button">
-                <span class="icono-menu">☁️</span>
-                <span>Conectar Google Drive</span>
-            </button>
-
             <p id="estadoGoogleDrive" class="subtitulo-pantalla" style="text-align:center; width:100%;">
                 Google Drive: sin conectar
             </p>
@@ -448,7 +467,7 @@
 
             >
 
-                Pescados y Mariscos El Boquerón
+                Carlos Eduardo
 
             </strong>
 
@@ -1318,7 +1337,7 @@
 
                 <strong>
 
-                    Empresa 2
+                    Robinson Rojas Bustos
 
                 </strong>
 
@@ -1358,6 +1377,34 @@
 
 
 
+
+
+<!-- =====================================================
+     CONFIGURACIÓN DE AUTÓNOMOS
+===================================================== -->
+
+<div id="pantallaConfiguracion" class="pantalla-empresas oculto">
+    <div class="ventana-empresas ventana-configuracion">
+        <h2>⚙️ Configuración</h2>
+        <p class="subtitulo-configuracion">Pescados El Boquerón</p>
+        <p>Configura los dos autónomos. Los albaranes, clientes y pendientes se mantendrán separados para cada uno.</p>
+
+        <div class="campo-configuracion">
+            <label for="nombreAutonomo1">Autónomo 1</label>
+            <input id="nombreAutonomo1" type="text" autocomplete="off" value="Carlos Eduardo">
+        </div>
+
+        <div class="campo-configuracion">
+            <label for="nombreAutonomo2">Autónomo 2</label>
+            <input id="nombreAutonomo2" type="text" autocomplete="off" value="Robinson Rojas Bustos">
+        </div>
+
+        <div class="acciones-configuracion">
+            <button id="btnCancelarConfiguracion" class="boton-secundario" type="button">Cancelar</button>
+            <button id="btnGuardarConfiguracion" class="boton-confirmar-firma" type="button">✓ Guardar cambios</button>
+        </div>
+    </div>
+</div>
 
 
 <!-- =====================================================

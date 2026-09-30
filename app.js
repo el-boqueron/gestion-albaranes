@@ -32,102 +32,154 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 
 
 /* =========================================================
-   GOOGLE DRIVE - CONEXIÓN OAUTH
+   ACCESO PRIVADO + GOOGLE DRIVE PERMANENTE - V11
 ========================================================= */
 
-const GOOGLE_CLIENT_ID = "1025855069597-de3jfda4131darceicb76fqo442krc9j.apps.googleusercontent.com";
-const GOOGLE_DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-
-let googleTokenClient = null;
+const WORKER_URL = "https://gestion-albaranes-drive.facturaselboqueron.workers.dev";
+const CLAVE_SESION_APP = "gestionAlbaranesSesion";
 let googleAccessToken = null;
 
 const btnGoogleDrive = document.getElementById("btnGoogleDrive");
 const estadoGoogleDrive = document.getElementById("estadoGoogleDrive");
+const pantallaLogin = document.getElementById("pantallaLogin");
+const formLogin = document.getElementById("formLogin");
+const loginUsuario = document.getElementById("loginUsuario");
+const loginPassword = document.getElementById("loginPassword");
+const btnLogin = document.getElementById("btnLogin");
+const estadoLogin = document.getElementById("estadoLogin");
+const btnCerrarSesion = document.getElementById("btnCerrarSesion");
 
-function cargarGoogleIdentityServices() {
-    return new Promise((resolve, reject) => {
-        if (window.google?.accounts?.oauth2) {
-            resolve();
-            return;
-        }
-
-        const script = document.createElement("script");
-        script.src = "https://accounts.google.com/gsi/client";
-        script.async = true;
-        script.defer = true;
-        script.onload = resolve;
-        script.onerror = () => reject(
-            new Error("No se ha podido cargar Google Identity Services.")
-        );
-        document.head.appendChild(script);
-    });
+function obtenerTokenSesionApp() {
+    return localStorage.getItem(CLAVE_SESION_APP) || "";
 }
 
-async function prepararGoogleDrive() {
-    await cargarGoogleIdentityServices();
-
-    googleTokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: GOOGLE_CLIENT_ID,
-        scope: GOOGLE_DRIVE_SCOPE,
-        callback: () => {}
-    });
+function guardarTokenSesionApp(token) {
+    localStorage.setItem(CLAVE_SESION_APP, token);
 }
 
-function solicitarTokenGoogle() {
-    return new Promise(async (resolve, reject) => {
-        try {
-            if (!googleTokenClient) {
-                await prepararGoogleDrive();
-            }
-
-            googleTokenClient.callback = respuesta => {
-                if (respuesta.error) {
-                    reject(new Error(respuesta.error));
-                    return;
-                }
-
-                googleAccessToken = respuesta.access_token;
-                resolve(googleAccessToken);
-            };
-
-            googleTokenClient.requestAccessToken({
-                prompt: googleAccessToken ? "" : "consent"
-            });
-        }
-        catch (error) {
-            reject(error);
-        }
-    });
+function borrarTokenSesionApp() {
+    localStorage.removeItem(CLAVE_SESION_APP);
+    googleAccessToken = null;
 }
 
-async function probarConexionGoogleDrive() {
-    estadoGoogleDrive.textContent = "Google Drive: conectando...";
-
-    const token = await solicitarTokenGoogle();
-
-    const respuesta = await fetch(
-        "https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)",
-        {
-            headers: {
-                Authorization: "Bearer " + token
-            }
-        }
-    );
-
-    if (!respuesta.ok) {
-        throw new Error(
-            "Google Drive respondió " +
-            respuesta.status +
-            ": " +
-            await respuesta.text()
-        );
+async function peticionWorker(ruta, opciones = {}, requiereSesion = true) {
+    const headers = new Headers(opciones.headers || {});
+    if (requiereSesion) {
+        const tokenSesion = obtenerTokenSesionApp();
+        if (!tokenSesion) throw new Error("Sesión no iniciada.");
+        headers.set("Authorization", "Bearer " + tokenSesion);
     }
-
-    estadoGoogleDrive.textContent = "Google Drive: conectado ✓";
-    btnGoogleDrive.innerHTML =
-        '<span class="icono-menu">☁️</span><span>Google Drive conectado ✓</span>';
+    return fetch(WORKER_URL + ruta, { ...opciones, headers });
 }
 
+async function validarSesionApp() {
+    const token = obtenerTokenSesionApp();
+    if (!token) return false;
+    try {
+        const respuesta = await peticionWorker("/session");
+        return respuesta.ok;
+    } catch (error) {
+        console.error("No se pudo comprobar la sesión:", error);
+        return false;
+    }
+}
+
+async function obtenerTokenGoogleDesdeWorker() {
+    const respuesta = await peticionWorker("/token");
+    const datos = await respuesta.json().catch(() => ({}));
+    if (respuesta.status === 401 && datos.authenticated === false) {
+        borrarTokenSesionApp();
+        mostrarLogin();
+        throw new Error("La sesión de la aplicación no es válida.");
+    }
+    if (!respuesta.ok || !datos.access_token) {
+        throw new Error(datos.error || "No se pudo obtener acceso a Google Drive.");
+    }
+    googleAccessToken = datos.access_token;
+    return googleAccessToken;
+}
+
+async function prepararGoogleDriveAutomatico() {
+    try {
+        await obtenerTokenGoogleDesdeWorker();
+        estadoGoogleDrive.textContent = "Google Drive: conectado automáticamente ✓";
+        btnGoogleDrive.textContent = "☁️ Google Drive conectado ✓";
+        await sincronizarConGoogleDrive();
+    } catch (error) {
+        console.error("Error preparando Google Drive:", error);
+        estadoGoogleDrive.textContent = "Google Drive: no disponible";
+        btnGoogleDrive.textContent = "☁️ Reintentar Google Drive";
+    }
+}
+
+function mostrarLogin() {
+    pantallaLogin.classList.remove("oculto");
+    pantallaAccesoUsuario.classList.add("oculto");
+}
+
+function mostrarSeleccionAutonomo() {
+    pantallaLogin.classList.add("oculto");
+    pantallaAccesoUsuario.classList.remove("oculto");
+}
+
+formLogin.addEventListener("submit", async event => {
+    event.preventDefault();
+    estadoLogin.textContent = "";
+    btnLogin.disabled = true;
+    btnLogin.textContent = "Entrando...";
+    try {
+        const respuesta = await peticionWorker("/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                usuario: loginUsuario.value.trim(),
+                password: loginPassword.value
+            })
+        }, false);
+        const datos = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok || !datos.token) throw new Error(datos.error || "No se pudo iniciar sesión.");
+        guardarTokenSesionApp(datos.token);
+        loginPassword.value = "";
+        mostrarSeleccionAutonomo();
+        await prepararGoogleDriveAutomatico();
+    } catch (error) {
+        estadoLogin.textContent = error.message || "Usuario o contraseña incorrectos.";
+    } finally {
+        btnLogin.disabled = false;
+        btnLogin.textContent = "Iniciar sesión";
+    }
+});
+
+btnCerrarSesion.addEventListener("click", () => {
+    menuSuperior.classList.add("oculto");
+    if (!confirm("¿Quieres cerrar la sesión en este dispositivo?")) return;
+    borrarTokenSesionApp();
+    loginUsuario.value = "";
+    loginPassword.value = "";
+    estadoLogin.textContent = "";
+    mostrarLogin();
+});
+
+btnGoogleDrive.addEventListener("click", async () => {
+    btnGoogleDrive.disabled = true;
+    estadoGoogleDrive.textContent = "Google Drive: conectando...";
+    try {
+        await prepararGoogleDriveAutomatico();
+        if (googleAccessToken) alert("Google Drive está conectado correctamente.");
+    } finally {
+        btnGoogleDrive.disabled = false;
+    }
+});
+
+async function iniciarAccesoPrivado() {
+    if (await validarSesionApp()) {
+        mostrarSeleccionAutonomo();
+        await prepararGoogleDriveAutomatico();
+    } else {
+        borrarTokenSesionApp();
+        mostrarLogin();
+    }
+}
 
 /* =========================================================
    GOOGLE DRIVE - GUARDAR ALBARANES FIRMADOS
@@ -146,24 +198,20 @@ function limpiarNombreDrive(valor) {
         .trim() || "Sin nombre";
 }
 
-async function peticionDrive(url, opciones = {}) {
+async function peticionDrive(url, opciones = {}, reintento = true) {
     if (!googleAccessToken) {
-        throw new Error("Google Drive no está conectado.");
+        await obtenerTokenGoogleDesdeWorker();
     }
 
     const headers = new Headers(opciones.headers || {});
     headers.set("Authorization", "Bearer " + googleAccessToken);
 
-    const respuesta = await fetch(url, {
-        ...opciones,
-        headers
-    });
+    const respuesta = await fetch(url, { ...opciones, headers });
 
-    if (respuesta.status === 401) {
+    if (respuesta.status === 401 && reintento) {
         googleAccessToken = null;
-        estadoGoogleDrive.textContent = "Google Drive: sesión caducada";
-        btnGoogleDrive.innerHTML =
-            '<span class="icono-menu">☁️</span><span>Conectar Google Drive</span>';
+        await obtenerTokenGoogleDesdeWorker();
+        return peticionDrive(url, opciones, false);
     }
 
     return respuesta;
@@ -247,7 +295,7 @@ async function buscarPDFDrive(nombre, parentId) {
 
 async function subirPDFDrive(albaran) {
     if (!googleAccessToken) {
-        return { subido: false, motivo: "sin_conexion" };
+        await obtenerTokenGoogleDesdeWorker();
     }
 
     const empresa = EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa";
@@ -330,6 +378,7 @@ async function registrarSubidaDrive(albaran, resultado) {
     albaranes[indice].driveNombre = resultado.nombre;
     albaranes[indice].driveEnlace = resultado.enlace;
     albaranes[indice].fechaSubidaDrive = new Date().toISOString();
+    albaranes[indice].updatedAt = new Date().toISOString();
     guardarAlbaranes(albaranes);
 
     if (albaranAbierto && albaranAbierto.id === albaran.id) {
@@ -337,31 +386,129 @@ async function registrarSubidaDrive(albaran, resultado) {
     }
 }
 
-btnGoogleDrive.addEventListener("click", async () => {
-    btnGoogleDrive.disabled = true;
+/* =========================================================
+   SINCRONIZACIÓN ENTRE DISPOSITIVOS - GOOGLE DRIVE
+========================================================= */
 
+const NOMBRE_ARCHIVO_SINCRONIZACION = "gestion-albaranes-data.json";
+let sincronizacionEnCurso = false;
+let temporizadorSincronizacion = null;
+let omitirSincronizacionAutomatica = false;
+
+function claveUnicaAlbaran(albaran) {
+    return `${albaran.empresa || "boqueron"}::${albaran.numero || albaran.id}`;
+}
+
+function fechaActualizacionAlbaran(albaran) {
+    const valor = albaran.updatedAt || albaran.fechaFirma || albaran.fechaSubidaDrive || "";
+    const tiempo = Date.parse(valor);
+    if (Number.isFinite(tiempo)) return tiempo;
+    const idNumerico = Number(albaran.id);
+    return Number.isFinite(idNumerico) ? idNumerico : 0;
+}
+
+function normalizarAlbaranSincronizado(albaran) {
+    const copia = { ...albaran };
+    if (!copia.empresa) copia.empresa = "boqueron";
+    if (!copia.updatedAt) {
+        const base = Number(copia.id);
+        copia.updatedAt = copia.fechaFirma || copia.fechaSubidaDrive || new Date(Number.isFinite(base) ? base : Date.now()).toISOString();
+    }
+    return copia;
+}
+
+function combinarAlbaranes(locales, remotos) {
+    const mapa = new Map();
+    for (const original of [...(locales || []), ...(remotos || [])]) {
+        if (!original || typeof original !== "object") continue;
+        const albaran = normalizarAlbaranSincronizado(original);
+        const clave = claveUnicaAlbaran(albaran);
+        const existente = mapa.get(clave);
+        if (!existente || fechaActualizacionAlbaran(albaran) >= fechaActualizacionAlbaran(existente)) {
+            mapa.set(clave, albaran);
+        }
+    }
+    return Array.from(mapa.values());
+}
+
+async function buscarArchivoSincronizacionDrive(carpetaRaiz) {
+    const q = [
+        `name = '${escaparConsultaDrive(NOMBRE_ARCHIVO_SINCRONIZACION)}'`,
+        "mimeType = 'application/json'",
+        "trashed = false",
+        `'${escaparConsultaDrive(carpetaRaiz)}' in parents`
+    ].join(" and ");
+    const url = "https://www.googleapis.com/drive/v3/files?q=" + encodeURIComponent(q) + "&fields=files(id,name,modifiedTime)&pageSize=10";
+    const respuesta = await peticionDrive(url);
+    if (!respuesta.ok) throw new Error("No se pudo buscar el archivo de sincronización: " + await respuesta.text());
+    const datos = await respuesta.json();
+    return datos.files?.[0] || null;
+}
+
+async function descargarDatosSincronizacionDrive(archivo) {
+    if (!archivo?.id) return null;
+    const respuesta = await peticionDrive(`https://www.googleapis.com/drive/v3/files/${archivo.id}?alt=media`);
+    if (!respuesta.ok) throw new Error("No se pudieron descargar los datos sincronizados: " + await respuesta.text());
+    return respuesta.json();
+}
+
+async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, datos) {
+    const contenido = JSON.stringify(datos);
+    let respuesta;
+    if (archivoExistente?.id) {
+        respuesta = await peticionDrive(
+            `https://www.googleapis.com/upload/drive/v3/files/${archivoExistente.id}?uploadType=media&fields=id,name,modifiedTime`,
+            { method: "PATCH", headers: { "Content-Type": "application/json" }, body: contenido }
+        );
+    } else {
+        const separador = "gestion_albaranes_sync_" + Date.now();
+        const metadata = { name: NOMBRE_ARCHIVO_SINCRONIZACION, mimeType: "application/json", parents: [carpetaRaiz] };
+        const cuerpo = new Blob([
+            `--${separador}\r\n`, "Content-Type: application/json; charset=UTF-8\r\n\r\n", JSON.stringify(metadata),
+            `\r\n--${separador}\r\n`, "Content-Type: application/json; charset=UTF-8\r\n\r\n", contenido,
+            `\r\n--${separador}--`
+        ]);
+        respuesta = await peticionDrive(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime",
+            { method: "POST", headers: { "Content-Type": `multipart/related; boundary=${separador}` }, body: cuerpo }
+        );
+    }
+    if (!respuesta.ok) throw new Error("No se pudieron guardar los datos sincronizados: " + await respuesta.text());
+    return respuesta.json();
+}
+
+async function sincronizarConGoogleDrive() {
+    if (sincronizacionEnCurso || !obtenerTokenSesionApp()) return;
+    sincronizacionEnCurso = true;
     try {
-        await probarConexionGoogleDrive();
-        alert("Conexión con Google Drive realizada correctamente.");
+        if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
+        const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
+        const archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+        const remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
+        const combinados = combinarAlbaranes(obtenerAlbaranes(), Array.isArray(remoto?.albaranes) ? remoto.albaranes : []);
+        omitirSincronizacionAutomatica = true;
+        try { localStorage.setItem("albaranes", JSON.stringify(combinados)); }
+        finally { omitirSincronizacionAutomatica = false; }
+        await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
+            version: 1, actualizado: new Date().toISOString(), albaranes: combinados
+        });
+        actualizarContadorPendientes();
+        if (!pantallaPendientes.classList.contains("oculto")) mostrarPendientes();
+        if (!pantallaClientes.classList.contains("oculto")) mostrarClientes();
+        estadoGoogleDrive.textContent = "Google Drive: conectado y sincronizado ✓";
+    } catch (error) {
+        console.error("Error sincronizando con Google Drive:", error);
+        estadoGoogleDrive.textContent = "Google Drive: conectado · sincronización pendiente";
+    } finally {
+        sincronizacionEnCurso = false;
     }
-    catch (error) {
-        console.error("Error conectando Google Drive:", error);
-        estadoGoogleDrive.textContent = "Google Drive: error de conexión";
-        alert("No se ha podido conectar con Google Drive.");
-    }
-    finally {
-        btnGoogleDrive.disabled = false;
-    }
-});
+}
 
-prepararGoogleDrive().catch(error => {
-    console.error("No se pudo preparar Google Drive:", error);
-});
-
-
-
-
-
+function programarSincronizacionDrive() {
+    if (omitirSincronizacionAutomatica || !obtenerTokenSesionApp()) return;
+    clearTimeout(temporizadorSincronizacion);
+    temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 800);
+}
 
 /* =========================================================
 
@@ -379,7 +526,7 @@ const EMPRESAS = {
 
         id: "boqueron",
 
-        nombre: "Pescados y Mariscos El Boquerón",
+        nombre: "Carlos Eduardo",
 
 
 
@@ -387,7 +534,7 @@ const EMPRESAS = {
 
             x: 75,
 
-            y: 40,
+            y: 35,
 
             ancho: 170
 
@@ -401,7 +548,7 @@ const EMPRESAS = {
 
         id: "empresa2",
 
-        nombre: "Empresa 2",
+        nombre: "Robinson Rojas Bustos",
 
 
 
@@ -409,7 +556,7 @@ const EMPRESAS = {
 
             x: 75,
 
-            y: 40,
+            y: 35,
 
             ancho: 170
 
@@ -422,7 +569,37 @@ const EMPRESAS = {
 };
 
 
+const NOMBRE_NEGOCIO = "Pescados El Boquerón";
+const CLAVE_CONFIG_EMPRESAS = "configEmpresas";
 
+function cargarConfiguracionEmpresas() {
+    try {
+        const guardada = JSON.parse(localStorage.getItem(CLAVE_CONFIG_EMPRESAS) || "null");
+        if (!guardada) return;
+
+        if (typeof guardada.boqueron === "string" && guardada.boqueron.trim()) {
+            EMPRESAS.boqueron.nombre = guardada.boqueron.trim();
+        }
+
+        if (typeof guardada.empresa2 === "string" && guardada.empresa2.trim()) {
+            EMPRESAS.empresa2.nombre = guardada.empresa2.trim();
+        }
+    } catch (error) {
+        console.warn("No se pudo cargar la configuración de autónomos:", error);
+    }
+}
+
+function guardarConfiguracionEmpresas() {
+    localStorage.setItem(
+        CLAVE_CONFIG_EMPRESAS,
+        JSON.stringify({
+            boqueron: EMPRESAS.boqueron.nombre,
+            empresa2: EMPRESAS.empresa2.nombre
+        })
+    );
+}
+
+cargarConfiguracionEmpresas();
 
 
 /* =========================================================
@@ -473,6 +650,24 @@ const pantallaEmpresas =
 
     document.getElementById("pantallaEmpresas");
 
+const pantallaConfiguracion =
+    document.getElementById("pantallaConfiguracion");
+
+const btnConfiguracion =
+    document.getElementById("btnConfiguracion");
+
+const btnCancelarConfiguracion =
+    document.getElementById("btnCancelarConfiguracion");
+
+const btnGuardarConfiguracion =
+    document.getElementById("btnGuardarConfiguracion");
+
+const nombreAutonomo1 =
+    document.getElementById("nombreAutonomo1");
+
+const nombreAutonomo2 =
+    document.getElementById("nombreAutonomo2");
+
 
 
 
@@ -506,6 +701,13 @@ const empresaDestinoImportacion =
 const btnCambiarEmpresa =
 
     document.getElementById("btnCambiarEmpresa");
+
+const menuSuperior = document.getElementById("menuSuperior");
+const pantallaAccesoUsuario = document.getElementById("pantallaAccesoUsuario");
+const btnAccesoRobinson = document.getElementById("btnAccesoRobinson");
+const btnAccesoCarlos = document.getElementById("btnAccesoCarlos");
+const btnUsuarioRobinson = document.getElementById("btnUsuarioRobinson");
+const btnUsuarioCarlos = document.getElementById("btnUsuarioCarlos");
 
 
 
@@ -869,6 +1071,10 @@ btnInicio.addEventListener(
 
             .add("oculto");
 
+        pantallaConfiguracion
+            .classList
+            .add("oculto");
+
 
 
         pantallaFirma
@@ -923,33 +1129,39 @@ btnInicio.addEventListener(
 
 
 
-btnCambiarEmpresa.addEventListener(
+btnCambiarEmpresa.addEventListener("click", event => {
+    event.stopPropagation();
+    menuSuperior.classList.toggle("oculto");
+});
 
-    "click",
-
-    () => {
-
-
-
-        actualizarOpcionesEmpresa();
-
-
-
-        pantallaEmpresas
-
-            .classList
-
-            .remove("oculto");
-
-
-
+document.addEventListener("click", event => {
+    if (!event.target.closest(".menu-superior-contenedor")) {
+        menuSuperior.classList.add("oculto");
     }
+});
 
-);
+function iniciarConUsuario(idEmpresa) {
+    if (!EMPRESAS[idEmpresa]) return;
+    empresaActiva = idEmpresa;
+    localStorage.setItem("empresaActiva", empresaActiva);
+    pantallaAccesoUsuario.classList.add("oculto");
+    actualizarEmpresaVisual();
+    actualizarContadorPendientes();
+    mostrarInicio();
+}
 
+function solicitarCambioUsuario(idEmpresa) {
+    if (!EMPRESAS[idEmpresa] || idEmpresa === empresaActiva) return;
+    const nombre = EMPRESAS[idEmpresa].nombre;
+    if (confirm("¿Quieres cambiar de usuario a " + nombre + "?")) {
+        seleccionarEmpresa(idEmpresa);
+    }
+}
 
-
-
+btnAccesoRobinson.addEventListener("click", () => iniciarConUsuario("empresa2"));
+btnAccesoCarlos.addEventListener("click", () => iniciarConUsuario("boqueron"));
+btnUsuarioRobinson.addEventListener("click", () => solicitarCambioUsuario("empresa2"));
+btnUsuarioCarlos.addEventListener("click", () => solicitarCambioUsuario("boqueron"));
 
 btnCancelarEmpresa.addEventListener(
 
@@ -1135,12 +1347,62 @@ function actualizarEmpresaVisual() {
 
         empresa.nombre;
 
-
+    btnUsuarioRobinson.textContent = EMPRESAS.empresa2.nombre;
+    btnUsuarioCarlos.textContent = EMPRESAS.boqueron.nombre;
+    btnAccesoRobinson.textContent = EMPRESAS.empresa2.nombre;
+    btnAccesoCarlos.textContent = EMPRESAS.boqueron.nombre;
+    btnUsuarioRobinson.classList.toggle("activo", empresaActiva === "empresa2");
+    btnUsuarioCarlos.classList.toggle("activo", empresaActiva === "boqueron");
 
 }
 
 
 
+
+
+/* =========================================================
+   CONFIGURACIÓN DE AUTÓNOMOS
+========================================================= */
+
+btnConfiguracion.addEventListener("click", () => {
+    menuSuperior.classList.add("oculto");
+    nombreAutonomo1.value = EMPRESAS.boqueron.nombre;
+    nombreAutonomo2.value = EMPRESAS.empresa2.nombre;
+    pantallaConfiguracion.classList.remove("oculto");
+});
+
+btnCancelarConfiguracion.addEventListener("click", () => {
+    pantallaConfiguracion.classList.add("oculto");
+});
+
+btnGuardarConfiguracion.addEventListener("click", () => {
+    const nombre1 = nombreAutonomo1.value.trim();
+    const nombre2 = nombreAutonomo2.value.trim();
+
+    if (!nombre1 || !nombre2) {
+        alert("Los dos autónomos deben tener un nombre.");
+        return;
+    }
+
+    EMPRESAS.boqueron.nombre = nombre1;
+    EMPRESAS.empresa2.nombre = nombre2;
+    guardarConfiguracionEmpresas();
+    actualizarTextosEmpresas();
+    actualizarEmpresaVisual();
+    actualizarContadorPendientes();
+    pantallaConfiguracion.classList.add("oculto");
+    alert("Configuración guardada correctamente.");
+});
+
+function actualizarTextosEmpresas() {
+    document.querySelectorAll(".opcion-empresa").forEach(boton => {
+        const empresa = EMPRESAS[boton.dataset.empresa];
+        const texto = boton.querySelector("strong");
+        if (empresa && texto) texto.textContent = empresa.nombre;
+    });
+}
+
+actualizarTextosEmpresas();
 
 
 /* =========================================================
@@ -1987,6 +2249,136 @@ async function leerAlbaranPDF(archivo) {
 
 function extraerDatosAlbaran(texto) {
 
+    if (empresaActiva === "empresa2") {
+        return extraerDatosAlbaranRobinson(texto);
+    }
+
+    return extraerDatosAlbaranCarlos(texto);
+
+}
+
+
+/* =========================================================
+
+   EXTRAER DATOS - ROBINSON ROJAS BUSTOS
+
+========================================================= */
+
+function extraerDatosAlbaranRobinson(texto) {
+
+    const lineas = texto
+        .split(/\r?\n/)
+        .map(linea => linea.replace(/\s+/g, " ").trim())
+        .filter(linea => linea.length > 0);
+
+    const textoLimpio = lineas.join(" ");
+
+    const coincidenciaNumero = textoLimpio.match(
+        /Número\s+de\s+albarán\s*:\s*(AL-\d{4}-\d+)/i
+    );
+
+    const numero = coincidenciaNumero
+        ? coincidenciaNumero[1]
+        : "No detectado";
+
+    const coincidenciaFecha = textoLimpio.match(
+        /Fecha\s*:\s*(\d{2}\/\d{2}\/\d{4})/i
+    ) || textoLimpio.match(
+        /\b(\d{2}\/\d{2}\/\d{4})\b/
+    );
+
+    const fecha = coincidenciaFecha
+        ? coincidenciaFecha[1]
+        : "No detectada";
+
+    let cliente = "No detectado";
+
+    /*
+       En el formato de Robinson el cliente está delimitado
+       por "Cliente:" y el NIF del propio cliente. Usamos
+       primero esa estructura para evitar que la fecha, que
+       internamente puede aparecer justo después de Cliente,
+       sea confundida con el nombre.
+    */
+    const posicionCliente = textoLimpio.search(/Cliente\s*:/i);
+
+    if (posicionCliente !== -1) {
+        const zonaCliente = textoLimpio.substring(posicionCliente);
+        const coincidenciaCliente = zonaCliente.match(
+            /Cliente\s*:\s*(?:Fecha\s*:\s*\d{2}\/\d{2}\/\d{4}\s*)?(.+?)\s+NIF\s*:/i
+        );
+
+        if (coincidenciaCliente && coincidenciaCliente[1]) {
+            let candidato = coincidenciaCliente[1]
+                .replace(/^Fecha\s*:\s*\d{2}\/\d{2}\/\d{4}\s*/i, "")
+                .trim();
+
+            candidato = limpiarNombreCliente(candidato);
+
+            if (esNombreClienteValido(candidato)) {
+                cliente = candidato;
+            }
+        }
+    }
+
+    /*
+       Respaldo por líneas: ignoramos expresamente Fecha,
+       NIF, direcciones y otros campos que no son cliente.
+    */
+    if (cliente === "No detectado") {
+        const indiceCliente = lineas.findIndex(
+            linea => /^Cliente\s*:/i.test(linea)
+        );
+
+        if (indiceCliente !== -1) {
+            const mismaLinea = lineas[indiceCliente]
+                .replace(/^Cliente\s*:\s*/i, "")
+                .trim();
+
+            if (
+                mismaLinea &&
+                !/^Fecha\s*:/i.test(mismaLinea) &&
+                esNombreClienteValido(mismaLinea)
+            ) {
+                cliente = limpiarNombreCliente(mismaLinea);
+            }
+
+            if (cliente === "No detectado") {
+                for (
+                    let i = indiceCliente + 1;
+                    i < Math.min(indiceCliente + 10, lineas.length);
+                    i++
+                ) {
+                    const candidato = limpiarNombreCliente(lineas[i]);
+
+                    if (/^Fecha\s*:/i.test(candidato)) continue;
+
+                    if (esNombreClienteValido(candidato)) {
+                        cliente = candidato;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        numero,
+        cliente,
+        fecha
+    };
+
+}
+
+
+/* =========================================================
+
+   EXTRAER DATOS - CARLOS EDUARDO
+
+========================================================= */
+
+function extraerDatosAlbaranCarlos(texto) {
+
 
 
     /*
@@ -2673,6 +3065,10 @@ function esNombreClienteValido(
 
 
 
+        /^Fecha\s*:/i,
+
+
+
         /^\d{2}\/\d{2}\/\d{4}$/,
 
 
@@ -3007,7 +3403,10 @@ btnGuardarPendiente.addEventListener(
 
                 pdf:
 
-                    pdfBase64
+                    pdfBase64,
+
+                updatedAt:
+                    new Date().toISOString()
 
 
 
@@ -3310,6 +3709,9 @@ function guardarAlbaranes(
     );
 
 
+
+
+    programarSincronizacionDrive();
 
 }
 
@@ -5566,25 +5968,17 @@ btnConfirmarFirma.addEventListener(
 
 
             let mensajeDrive = "";
+            btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
 
-            if (googleAccessToken) {
-                btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
-
-                try {
-                    const resultadoDrive = await subirPDFDrive(albaranAbierto);
-                    await registrarSubidaDrive(albaranAbierto, resultadoDrive);
-
-                    if (resultadoDrive.subido) {
-                        mensajeDrive = "\nGuardado también en Google Drive.";
-                    }
+            try {
+                const resultadoDrive = await subirPDFDrive(albaranAbierto);
+                await registrarSubidaDrive(albaranAbierto, resultadoDrive);
+                if (resultadoDrive.subido) {
+                    mensajeDrive = "\nGuardado también en Google Drive.";
                 }
-                catch (errorDrive) {
-                    console.error("Error subiendo a Google Drive:", errorDrive);
-                    mensajeDrive = "\nEl PDF quedó guardado en la aplicación, pero no se pudo subir a Google Drive.";
-                }
-            }
-            else {
-                mensajeDrive = "\nEl PDF quedó guardado en la aplicación. Conecta Google Drive para subir los próximos automáticamente.";
+            } catch (errorDrive) {
+                console.error("Error subiendo a Google Drive:", errorDrive);
+                mensajeDrive = "\nEl PDF quedó guardado en la aplicación, pero no se pudo subir a Google Drive.";
             }
 
 
@@ -6133,6 +6527,12 @@ async function firmarPDFActual() {
 
 
 
+    albaranes[indice].updatedAt =
+
+        new Date().toISOString();
+
+
+
 
 
     guardarAlbaranes(
@@ -6440,3 +6840,5 @@ function escaparHTML(valor) {
    FIN APP.JS
 
 ========================================================= */
+
+window.addEventListener("DOMContentLoaded", () => { iniciarAccesoPrivado(); });

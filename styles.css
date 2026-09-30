@@ -1144,3 +1144,146 @@ button {
 /* =========================================================
    FIN
 ========================================================= */
+/* =========================================================
+   CONFIGURACIÓN DE AUTÓNOMOS
+========================================================= */
+
+.boton-configuracion {
+    border-color: #cbd5e1;
+}
+
+.ventana-configuracion {
+    max-width: 600px;
+}
+
+.subtitulo-configuracion {
+    margin: -8px 0 18px;
+    color: #253b80;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.campo-configuracion {
+    display: grid;
+    gap: 7px;
+    margin-top: 18px;
+}
+
+.campo-configuracion label {
+    font-weight: 700;
+}
+
+.campo-configuracion input {
+    width: 100%;
+    padding: 13px 14px;
+    border: 1px solid #cbd2d9;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #25313d;
+    font: inherit;
+    font-size: 16px;
+}
+
+.campo-configuracion input:focus {
+    outline: 2px solid #93b4ef;
+    border-color: #253b80;
+}
+
+.acciones-configuracion {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 10px;
+    margin-top: 24px;
+}
+
+@media (max-width: 700px) {
+    .acciones-configuracion {
+        grid-template-columns: 1fr;
+    }
+}
+
+
+/* =========================================================
+   ACCESO DE USUARIO Y MENÚ SUPERIOR - V10
+========================================================= */
+.pantalla-acceso-usuario {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px;
+    background: #f3f5f7;
+}
+.acceso-usuario-contenido { width: 100%; max-width: 700px; text-align: center; }
+.acceso-usuario-contenido h1 { margin: 0 0 10px; font-size: 30px; }
+.acceso-usuario-contenido p { margin: 0 0 28px; color: #647180; font-size: 17px; }
+.acceso-usuario-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.acceso-usuario-botones button {
+    min-height: 115px; padding: 20px; border: 2px solid #253b80; border-radius: 16px;
+    background: #fff; color: #253b80; font-size: 20px; font-weight: 800;
+    box-shadow: 0 5px 16px rgba(0,0,0,.08);
+}
+.selector-usuarios-inicio { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+.boton-usuario-inicio {
+    padding: 13px 12px; border: 2px solid #dce2e7; border-radius: 11px;
+    background: #fff; color: #25313d; font-size: 15px; font-weight: 700;
+}
+.boton-usuario-inicio.activo { border-color: #253b80; background: #eef2ff; color: #253b80; }
+.menu-superior-contenedor { position: relative; flex-shrink: 0; }
+.boton-tres-puntos {
+    width: 44px; height: 44px; padding: 0; border: 0; border-radius: 10px;
+    background: transparent; color: #25313d; font-size: 30px; font-weight: 800; line-height: 1;
+}
+.boton-tres-puntos:hover { background: #eef1f4; }
+.menu-superior {
+    position: absolute; top: 50px; right: 0; z-index: 200; min-width: 205px;
+    padding: 7px; border: 1px solid #dfe4e8; border-radius: 11px; background: #fff;
+    box-shadow: 0 10px 28px rgba(0,0,0,.16);
+}
+.menu-superior button {
+    width: 100%; padding: 12px 14px; border: 0; border-radius: 8px; background: #fff;
+    color: #25313d; text-align: left; font-size: 15px; font-weight: 700;
+}
+.menu-superior button:hover { background: #f3f5f7; }
+@media (max-width: 600px) {
+    .acceso-usuario-botones { grid-template-columns: 1fr; }
+    .acceso-usuario-botones button { min-height: 92px; }
+    .selector-usuarios-inicio { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .boton-usuario-inicio { font-size: 13px; padding: 11px 7px; }
+}
+
+
+/* =========================================================
+   LOGIN PRIVADO - V11
+========================================================= */
+.pantalla-login {
+    position: fixed; inset: 0; z-index: 6000; display: flex; align-items: center;
+    justify-content: center; padding: 22px; background: #f3f5f7;
+}
+.login-card {
+    width: 100%; max-width: 430px; padding: 28px; border: 1px solid #dfe4e8;
+    border-radius: 18px; background: #fff; box-shadow: 0 8px 28px rgba(0,0,0,.12);
+    display: grid; gap: 10px;
+}
+.login-card h1 { margin: 0; text-align: center; font-size: 28px; }
+.login-card > p:first-of-type { margin: 0 0 12px; text-align: center; color: #647180; }
+.login-card label { font-weight: 700; margin-top: 4px; }
+.login-card input {
+    width: 100%; padding: 13px 14px; border: 1px solid #cbd2d9; border-radius: 10px;
+    font: inherit; font-size: 16px;
+}
+.login-card button {
+    margin-top: 10px; padding: 14px; border: 0; border-radius: 10px;
+    background: #253b80; color: #fff; font-size: 16px; font-weight: 800;
+}
+.estado-login { min-height: 20px; margin: 4px 0 0; text-align: center; color: #b3261e; font-size: 14px; }
+
+/* Estado de Google Drive centrado en la pantalla principal */
+#estadoGoogleDrive {
+    display: block;
+    width: 100%;
+    margin: 10px auto 0;
+    text-align: center;
+}
