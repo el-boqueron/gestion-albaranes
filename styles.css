@@ -1287,3 +1287,42 @@ button {
     margin: 10px auto 0;
     text-align: center;
 }
+
+
+/* =========================================================
+   VISOR PDF.JS - V16
+   Renderizado propio compatible con Android
+========================================================= */
+
+.visor-pdf-renderizado {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    padding: 10px;
+    background: #525659;
+    text-align: center;
+    -webkit-overflow-scrolling: touch;
+}
+
+.pagina-pdf-renderizada {
+    display: block;
+    max-width: 100%;
+    height: auto !important;
+    margin: 0 auto 12px;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.visor-pdf-cargando,
+.visor-pdf-error {
+    margin: 20px;
+    padding: 18px;
+    border-radius: 10px;
+    background: #ffffff;
+    color: #263442;
+    font-weight: 700;
+}
+
+.visor-pdf-error {
+    color: #b3261e;
+}

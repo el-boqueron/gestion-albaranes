@@ -928,19 +928,139 @@ const iframePDF =
     document.getElementById("iframePDF");
 
 
-let urlBlobPDFVisor = null;
 
-function cargarPDFEnVisor(pdfDataURL) {
+let visorPDFRenderizado = null;
 
-    if (urlBlobPDFVisor) {
-        URL.revokeObjectURL(urlBlobPDFVisor);
-        urlBlobPDFVisor = null;
+
+
+function esDispositivoMovil() {
+
+    return (
+        window.matchMedia("(max-width: 768px)").matches ||
+        /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    );
+
+}
+
+
+
+function limpiarVisorPDFRenderizado() {
+
+    if (visorPDFRenderizado) {
+        visorPDFRenderizado.innerHTML = "";
+        visorPDFRenderizado.style.display = "none";
     }
 
-    const bytesPDF = dataURLAUint8Array(pdfDataURL);
-    const blobPDF = new Blob([bytesPDF], { type: "application/pdf" });
-    urlBlobPDFVisor = URL.createObjectURL(blobPDF);
-    iframePDF.src = urlBlobPDFVisor;
+}
+
+
+
+async function mostrarPDFEnVisor(pdfDataURL) {
+
+    if (esDispositivoMovil()) {
+
+        iframePDF.style.display = "none";
+
+        if (visorPDFRenderizado) {
+            visorPDFRenderizado.style.display = "";
+        }
+
+        await mostrarPDFEnVisorMovil(pdfDataURL);
+        return;
+    }
+
+    limpiarVisorPDFRenderizado();
+
+    iframePDF.style.display = "";
+    iframePDF.src = pdfDataURL;
+}
+
+
+
+async function mostrarPDFEnVisorMovil(pdfDataURL) {
+
+    if (!pdfDataURL) {
+        throw new Error("No se encuentra el PDF.");
+    }
+
+    const contenedor = iframePDF.parentElement;
+
+    iframePDF.style.display = "none";
+    iframePDF.src = "";
+
+    if (!visorPDFRenderizado) {
+        visorPDFRenderizado = document.createElement("div");
+        visorPDFRenderizado.id = "visorPDFRenderizado";
+        visorPDFRenderizado.className = "visor-pdf-renderizado";
+        contenedor.appendChild(visorPDFRenderizado);
+    }
+
+    visorPDFRenderizado.style.display = "";
+    visorPDFRenderizado.innerHTML = "";
+
+    const mensaje = document.createElement("div");
+    mensaje.className = "visor-pdf-cargando";
+    mensaje.textContent = "Cargando PDF...";
+    visorPDFRenderizado.appendChild(mensaje);
+
+    try {
+        const bytesPDF = dataURLAUint8Array(pdfDataURL);
+        const tarea = pdfjsLib.getDocument({ data: bytesPDF });
+        const pdf = await tarea.promise;
+
+        visorPDFRenderizado.innerHTML = "";
+
+        const anchoDisponible = Math.max(
+            280,
+            contenedor.clientWidth - 20
+        );
+
+        for (let numeroPagina = 1; numeroPagina <= pdf.numPages; numeroPagina++) {
+            const pagina = await pdf.getPage(numeroPagina);
+            const viewportBase = pagina.getViewport({ scale: 1 });
+            const escalaCSS = Math.min(
+                2,
+                anchoDisponible / viewportBase.width
+            );
+            const pixelRatio = Math.min(
+                window.devicePixelRatio || 1,
+                2
+            );
+            const viewportRender = pagina.getViewport({
+                scale: escalaCSS * pixelRatio
+            });
+
+            const canvas = document.createElement("canvas");
+            canvas.className = "pagina-pdf-renderizada";
+            canvas.width = Math.floor(viewportRender.width);
+            canvas.height = Math.floor(viewportRender.height);
+            canvas.style.width =
+                Math.floor(viewportRender.width / pixelRatio) + "px";
+            canvas.style.height =
+                Math.floor(viewportRender.height / pixelRatio) + "px";
+
+            visorPDFRenderizado.appendChild(canvas);
+
+            const contexto = canvas.getContext("2d", { alpha: false });
+
+            await pagina.render({
+                canvasContext: contexto,
+                viewport: viewportRender
+            }).promise;
+        }
+    }
+    catch (error) {
+        console.error("Error mostrando PDF:", error);
+        visorPDFRenderizado.innerHTML = "";
+
+        const mensajeError = document.createElement("div");
+        mensajeError.className = "visor-pdf-error";
+        mensajeError.textContent =
+            "No se ha podido visualizar el PDF.";
+        visorPDFRenderizado.appendChild(mensajeError);
+
+        throw error;
+    }
 }
 
 
@@ -4253,7 +4373,7 @@ function cargarListaPendientes() {
 
 
 
-function abrirAlbaranPendiente(
+async function abrirAlbaranPendiente(
 
     id
 
@@ -4363,11 +4483,22 @@ function abrirAlbaranPendiente(
 
 
 
-    cargarPDFEnVisor(
+    try {
 
-        albaran.pdf
+        await mostrarPDFEnVisor(
+            albaran.pdf
+        );
 
-    );
+    }
+    catch (error) {
+
+        alert(
+            "No se ha podido visualizar el PDF."
+        );
+
+        return;
+
+    }
 
 
 
@@ -5069,7 +5200,7 @@ function cargarAlbaranesCliente() {
 
 
 
-function abrirAlbaranFirmado(
+async function abrirAlbaranFirmado(
 
     id
 
@@ -5191,11 +5322,22 @@ function abrirAlbaranFirmado(
 
 
 
-    cargarPDFEnVisor(
+    try {
 
-        albaran.pdf
+        await mostrarPDFEnVisor(
+            albaran.pdf
+        );
 
-    );
+    }
+    catch (error) {
+
+        alert(
+            "No se ha podido visualizar el PDF."
+        );
+
+        return;
+
+    }
 
 
 
