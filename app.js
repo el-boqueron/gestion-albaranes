@@ -3427,6 +3427,12 @@ btnGuardarPendiente.addEventListener(
 
                         empresaActiva
 
+                    &&
+
+                    albaran.estado !==
+
+                        "eliminado"
+
             );
 
 
@@ -4277,19 +4283,41 @@ function cargarListaPendientes() {
 
 
 
-                <button
+                <div class="acciones-pendiente">
 
-                    class="boton-abrir"
+                    <button
 
-                    data-id="${albaran.id}"
+                        class="boton-abrir"
 
-                    type="button"
+                        data-id="${albaran.id}"
 
-                >
+                        type="button"
 
-                    Abrir y firmar
+                    >
 
-                </button>
+                        Abrir y firmar
+
+                    </button>
+
+                    <button
+
+                        class="boton-borrar-pendiente"
+
+                        data-id="${albaran.id}"
+
+                        type="button"
+
+                        title="Borrar albarán"
+
+                        aria-label="Borrar albarán ${escaparHTML(albaran.numero)}"
+
+                    >
+
+                        🗑️
+
+                    </button>
+
+                </div>
 
             `;
 
@@ -4359,6 +4387,105 @@ function cargarListaPendientes() {
 
 
 
+
+
+
+    listaPendientes
+
+        .querySelectorAll(
+
+            ".boton-borrar-pendiente"
+
+        )
+
+        .forEach(
+
+            boton => {
+
+
+
+                boton.addEventListener(
+
+                    "click",
+
+                    () => {
+
+
+
+                        borrarAlbaranPendiente(
+
+                            Number(
+
+                                boton.dataset.id
+
+                            )
+
+                        );
+
+
+
+                    }
+
+                );
+
+
+
+            }
+
+        );
+
+
+
+}
+
+
+
+function borrarAlbaranPendiente(id) {
+
+    const albaranes = obtenerAlbaranes();
+
+    const indice = albaranes.findIndex(
+        albaran =>
+            albaran.id === id
+            &&
+            albaran.empresa === empresaActiva
+            &&
+            albaran.estado === "pendiente"
+    );
+
+    if (indice === -1) return;
+
+    const albaran = albaranes[indice];
+
+    const confirmado = confirm(
+        "¿Seguro que quieres borrar el albarán "
+        + albaran.numero
+        + "?\n\nPodrás corregirlo y volverlo a subir después."
+    );
+
+    if (!confirmado) return;
+
+    /*
+       Se conserva una marca mínima de borrado para sincronizarla.
+       Así Google Drive u otro dispositivo no puede resucitar
+       una copia antigua del albarán.
+    */
+    const ahora = new Date().toISOString();
+
+    albaranes[indice] = {
+        id: albaran.id,
+        numero: albaran.numero,
+        cliente: albaran.cliente,
+        fecha: albaran.fecha,
+        empresa: albaran.empresa,
+        estado: "eliminado",
+        eliminadoAt: ahora,
+        updatedAt: ahora
+    };
+
+    guardarAlbaranes(albaranes);
+    actualizarContadorPendientes();
+    cargarListaPendientes();
 }
 
 
