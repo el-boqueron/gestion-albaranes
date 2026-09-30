@@ -928,6 +928,22 @@ const iframePDF =
     document.getElementById("iframePDF");
 
 
+let urlBlobPDFVisor = null;
+
+function cargarPDFEnVisor(pdfDataURL) {
+
+    if (urlBlobPDFVisor) {
+        URL.revokeObjectURL(urlBlobPDFVisor);
+        urlBlobPDFVisor = null;
+    }
+
+    const bytesPDF = dataURLAUint8Array(pdfDataURL);
+    const blobPDF = new Blob([bytesPDF], { type: "application/pdf" });
+    urlBlobPDFVisor = URL.createObjectURL(blobPDF);
+    iframePDF.src = urlBlobPDFVisor;
+}
+
+
 
 
 
@@ -4347,9 +4363,11 @@ function abrirAlbaranPendiente(
 
 
 
-    iframePDF.src =
+    cargarPDFEnVisor(
 
-        albaran.pdf;
+        albaran.pdf
+
+    );
 
 
 
@@ -5173,9 +5191,11 @@ function abrirAlbaranFirmado(
 
 
 
-    iframePDF.src =
+    cargarPDFEnVisor(
 
-        albaran.pdf;
+        albaran.pdf
+
+    );
 
 
 
