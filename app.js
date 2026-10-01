@@ -7040,9 +7040,20 @@ btnConfirmarFirma.addEventListener(
             let mensajeDrive = "";
             btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
 
-            albaranes[indice].pendienteSubidaDrive = true;
-            albaranes[indice].updatedAt = new Date().toISOString();
-            guardarAlbaranes(albaranes);
+            const albaranesActualizados = obtenerAlbaranes();
+            const indiceActualizado = albaranesActualizados.findIndex(
+                albaran =>
+                    albaran.id === albaranAbierto.id
+                    &&
+                    albaran.empresa === albaranAbierto.empresa
+            );
+
+            if (indiceActualizado !== -1) {
+                albaranesActualizados[indiceActualizado].pendienteSubidaDrive = true;
+                albaranesActualizados[indiceActualizado].updatedAt = new Date().toISOString();
+                guardarAlbaranes(albaranesActualizados);
+                albaranAbierto = albaranesActualizados[indiceActualizado];
+            }
 
             try {
                 const resultadoDrive = await subirPDFDrive(albaranAbierto);
