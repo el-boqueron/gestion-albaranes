@@ -263,13 +263,43 @@ async function crearCarpetaDrive(nombre, parentId = "root") {
     return respuesta.json();
 }
 
+const creacionesCarpetaDriveEnCurso = new Map();
+
 async function obtenerOCrearCarpetaDrive(nombre, parentId = "root") {
     const nombreLimpio = limpiarNombreDrive(nombre);
-    const existente = await buscarCarpetaDrive(nombreLimpio, parentId);
-    if (existente) return existente.id;
+    const clave = `${parentId}::${nombreLimpio.toLocaleUpperCase("es")}`;
 
-    const creada = await crearCarpetaDrive(nombreLimpio, parentId);
-    return creada.id;
+    /*
+     * Evita que dos procesos de la propia app (subida del PDF y
+     * sincronización) busquen la misma carpeta al mismo tiempo y ambos
+     * terminen creándola.
+     */
+    if (creacionesCarpetaDriveEnCurso.has(clave)) {
+        return creacionesCarpetaDriveEnCurso.get(clave);
+    }
+
+    const operacion = (async () => {
+        const existente =
+            await buscarCarpetaDrive(nombreLimpio, parentId);
+
+        if (existente) {
+            return existente.id;
+        }
+
+        const creada =
+            await crearCarpetaDrive(nombreLimpio, parentId);
+
+        return creada.id;
+    })();
+
+    creacionesCarpetaDriveEnCurso.set(clave, operacion);
+
+    try {
+        return await operacion;
+    }
+    finally {
+        creacionesCarpetaDriveEnCurso.delete(clave);
+    }
 }
 
 async function buscarPDFDrive(nombre, parentId) {
