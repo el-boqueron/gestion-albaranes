@@ -2145,6 +2145,8 @@ async function leerAlbaranPDF(archivo) {
 
             .add("oculto");
 
+        btnGuardarPendiente.disabled = true;
+
 
 
 
@@ -2361,6 +2363,26 @@ async function leerAlbaranPDF(archivo) {
 
 
 
+        const empresaDetectada = detectarEmpresaDelAlbaran(textoCompleto);
+
+        if (!empresaDetectada) {
+            albaranActual = null;
+            btnGuardarPendiente.disabled = true;
+            estadoLectura.textContent = "No se ha podido identificar con seguridad el autónomo del albarán. No se puede añadir.";
+            estadoLectura.classList.add("error");
+            datosAlbaran.classList.add("oculto");
+            return;
+        }
+
+        if (empresaDetectada !== empresaActiva) {
+            albaranActual = null;
+            btnGuardarPendiente.disabled = true;
+            estadoLectura.textContent = "Este albarán pertenece a " + EMPRESAS[empresaDetectada].nombre + ". Estás trabajando en " + EMPRESAS[empresaActiva].nombre + ". No se puede añadir.";
+            estadoLectura.classList.add("error");
+            datosAlbaran.classList.add("oculto");
+            return;
+        }
+
         albaranActual = {
 
 
@@ -2392,6 +2414,8 @@ async function leerAlbaranPDF(archivo) {
 
 
 
+
+        btnGuardarPendiente.disabled = false;
 
         mostrarDatos(
 
@@ -2443,14 +2467,31 @@ async function leerAlbaranPDF(archivo) {
 
 
 
+function normalizarTextoIdentidad(texto) {
+    return String(texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toUpperCase().trim();
+}
+
+function detectarEmpresaDelAlbaran(texto) {
+    const normalizado = normalizarTextoIdentidad(texto);
+    const tieneCarlos = normalizado.includes("60213789L") || normalizado.includes("CARLOS EDUARDO ROJAS BUSTOS");
+    const tieneRobinson = normalizado.includes("60804545C") || normalizado.includes("ROBINSON ROJAS BUSTOS");
+    if (tieneCarlos && !tieneRobinson) return "boqueron";
+    if (tieneRobinson && !tieneCarlos) return "empresa2";
+    return null;
+}
+
 function extraerDatosAlbaran(texto) {
-
-    if (empresaActiva === "empresa2") {
-        return extraerDatosAlbaranRobinson(texto);
+    const pareceFormatoRobinson = /Cliente\s*:/i.test(texto) && /Fecha\s*:/i.test(texto);
+    const lectorPrincipal = pareceFormatoRobinson ? extraerDatosAlbaranRobinson : extraerDatosAlbaranCarlos;
+    const lectorAlternativo = pareceFormatoRobinson ? extraerDatosAlbaranCarlos : extraerDatosAlbaranRobinson;
+    let datos = lectorPrincipal(texto);
+    if (datos.numero === "No detectado" || datos.cliente === "No detectado" || datos.fecha === "No detectada") {
+        const alternativos = lectorAlternativo(texto);
+        if (datos.numero === "No detectado" && alternativos.numero !== "No detectado") datos.numero = alternativos.numero;
+        if (datos.cliente === "No detectado" && alternativos.cliente !== "No detectado") datos.cliente = alternativos.cliente;
+        if (datos.fecha === "No detectada" && alternativos.fecha !== "No detectada") datos.fecha = alternativos.fecha;
     }
-
-    return extraerDatosAlbaranCarlos(texto);
-
+    return datos;
 }
 
 
@@ -3427,6 +3468,12 @@ btnGuardarPendiente.addEventListener(
 
 
 
+
+
+        if (albaranActual.empresa !== empresaActiva) {
+            alert("El albarán no pertenece al autónomo seleccionado. No se puede guardar.");
+            return;
+        }
 
 
         if (

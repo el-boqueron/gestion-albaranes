@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v22";
+const CACHE_NAME = "gestion-albaranes-v23";
 
 const ARCHIVOS_APP = [
     "./",
