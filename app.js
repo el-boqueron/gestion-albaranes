@@ -7040,30 +7040,49 @@ btnConfirmarFirma.addEventListener(
             let mensajeDrive = "";
             btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
 
-            const albaranesActualizados = obtenerAlbaranes();
-            const indiceActualizado = albaranesActualizados.findIndex(
-                albaran =>
-                    albaran.id === albaranAbierto.id
-                    &&
-                    albaran.empresa === albaranAbierto.empresa
-            );
-
-            if (indiceActualizado !== -1) {
-                albaranesActualizados[indiceActualizado].pendienteSubidaDrive = true;
-                albaranesActualizados[indiceActualizado].updatedAt = new Date().toISOString();
-                guardarAlbaranes(albaranesActualizados);
-                albaranAbierto = albaranesActualizados[indiceActualizado];
-            }
+            /*
+             * firmarPDFActual() ya ha guardado el PDF firmado.
+             * Evitamos una segunda escritura previa a Drive, que en móvil
+             * podía fallar después de que la firma ya estuviera guardada.
+             */
+            albaranAbierto.pendienteSubidaDrive = true;
 
             try {
                 const resultadoDrive = await subirPDFDrive(albaranAbierto);
                 await registrarSubidaDrive(albaranAbierto, resultadoDrive);
+
                 if (resultadoDrive.subido) {
                     mensajeDrive = "\nGuardado también en Google Drive.";
                 }
-            } catch (errorDrive) {
+            }
+            catch (errorDrive) {
                 console.error("Error subiendo a Google Drive:", errorDrive);
-                mensajeDrive = "\nEl PDF quedó guardado en la aplicación, pero no se pudo subir a Google Drive.";
+
+                try {
+                    const pendientesDrive = obtenerAlbaranes();
+                    const indicePendiente = pendientesDrive.findIndex(
+                        albaran =>
+                            albaran.id === albaranAbierto.id
+                            &&
+                            albaran.empresa === albaranAbierto.empresa
+                    );
+
+                    if (indicePendiente !== -1) {
+                        pendientesDrive[indicePendiente].pendienteSubidaDrive = true;
+                        pendientesDrive[indicePendiente].updatedAt = new Date().toISOString();
+                        guardarAlbaranes(pendientesDrive);
+                        albaranAbierto = pendientesDrive[indicePendiente];
+                    }
+                }
+                catch (errorPendiente) {
+                    console.error(
+                        "No se pudo marcar la subida pendiente de Drive:",
+                        errorPendiente
+                    );
+                }
+
+                mensajeDrive =
+                    "\nEl PDF quedó firmado y guardado en la aplicación, pero no se pudo subir a Google Drive.";
             }
 
 
