@@ -880,6 +880,11 @@ const datosAlbaran =
     document.getElementById("datosAlbaran");
 
 
+const listaImportacionMultiple =
+
+    document.getElementById("listaImportacionMultiple");
+
+
 
 const numeroAlbaran =
 
@@ -1190,6 +1195,7 @@ let empresaActiva =
 
 
 let albaranActual = null;
+let loteImportacion = [];
 
 
 
@@ -2148,8 +2154,11 @@ btnAnadir.addEventListener(
 
 
         selectorPDF.value = "";
-
-
+        loteImportacion = [];
+        listaImportacionMultiple.innerHTML = "";
+        listaImportacionMultiple.classList.add("oculto");
+        btnGuardarPendiente.textContent = "Guardar en pendientes";
+        btnGuardarPendiente.style.display = "";
 
         selectorPDF.click();
 
@@ -2164,91 +2173,162 @@ btnAnadir.addEventListener(
 
 
 selectorPDF.addEventListener(
-
     "change",
-
     async event => {
 
+        const archivos =
+            Array.from(event.target.files || []);
 
-
-        const archivo =
-
-            event.target.files[0];
-
-
-
-        if (!archivo) {
-
+        if (!archivos.length) {
             return;
-
         }
 
-
-
-
-
-        const esPDF =
-
-            archivo.type ===
-
-                "application/pdf"
-
-            ||
-
-            archivo.name
-
-                .toLowerCase()
-
-                .endsWith(".pdf");
-
-
-
-
-
-        if (!esPDF) {
-
-
-
-            alert(
-
-                "Selecciona un archivo PDF."
-
+        const noPDF =
+            archivos.find(
+                archivo =>
+                    !(
+                        archivo.type === "application/pdf"
+                        ||
+                        archivo.name.toLowerCase().endsWith(".pdf")
+                    )
             );
 
-
-
+        if (noPDF) {
+            alert("Todos los archivos seleccionados deben ser PDF.");
             return;
-
-
-
         }
-
-
-
-
-
-        archivoActual = archivo;
-
-
 
         mostrarImportacion();
 
+        loteImportacion = [];
+        listaImportacionMultiple.innerHTML = "";
+        listaImportacionMultiple.classList.add("oculto");
+        datosAlbaran.classList.add("oculto");
 
+        if (archivos.length === 1) {
+            archivoActual = archivos[0];
+            btnGuardarPendiente.textContent = "Guardar en pendientes";
+            await leerAlbaranPDF(archivos[0]);
+            return;
+        }
 
-        await leerAlbaranPDF(
+        archivoActual = null;
+        albaranActual = null;
+        btnGuardarPendiente.textContent = "Añadir todos a pendientes";
 
-            archivo
+        const existentes = obtenerAlbaranes();
+        const numerosLote = new Set();
 
-        );
+        for (let i = 0; i < archivos.length; i++) {
+            const archivo = archivos[i];
 
+            estadoLectura.classList.remove("error");
+            estadoLectura.textContent =
+                "Leyendo " + (i + 1) + " de " + archivos.length + "...";
 
+            albaranActual = null;
+            await leerAlbaranPDF(archivo);
 
+            if (!albaranActual) {
+                loteImportacion.push({
+                    archivo,
+                    valido: false,
+                    error: estadoLectura.textContent
+                });
+                continue;
+            }
+
+            const datos = { ...albaranActual };
+            let error = "";
+
+            if (datos.numero === "No detectado") {
+                error = "No se ha podido detectar el número del albarán.";
+            }
+            else if (
+                existentes.some(
+                    item =>
+                        item.numero === datos.numero
+                        &&
+                        item.empresa === empresaActiva
+                        &&
+                        item.estado !== "eliminado"
+                )
+            ) {
+                error = "Ya está guardado.";
+            }
+            else if (numerosLote.has(datos.numero)) {
+                error = "Está repetido dentro de esta selección.";
+            }
+
+            if (!error) {
+                numerosLote.add(datos.numero);
+            }
+
+            loteImportacion.push({
+                archivo,
+                datos,
+                valido: !error,
+                error
+            });
+        }
+
+        albaranActual = null;
+        datosAlbaran.classList.add("oculto");
+        mostrarResultadoLoteImportacion();
     }
-
 );
 
 
+function escaparHTMLImportacion(valor) {
+    return String(valor ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
 
+
+function mostrarResultadoLoteImportacion() {
+    const validos =
+        loteImportacion.filter(item => item.valido).length;
+
+    const errores =
+        loteImportacion.length - validos;
+
+    estadoLectura.classList.toggle("error", validos === 0);
+    estadoLectura.textContent =
+        validos + " albarán" + (validos === 1 ? "" : "es") +
+        " listo" + (validos === 1 ? "" : "s") +
+        " para añadir" +
+        (errores ? " · " + errores + " con error" : "") +
+        ".";
+
+    listaImportacionMultiple.innerHTML =
+        loteImportacion.map(item => {
+            const datos = item.datos || {};
+            const clase = item.valido
+                ? "item-importacion-multiple valido"
+                : "item-importacion-multiple error";
+
+            const detalle = item.valido
+                ? `
+                    <div><strong>${escaparHTMLImportacion(datos.numero)}</strong></div>
+                    <div>${escaparHTMLImportacion(datos.cliente)}</div>
+                    <div>${escaparHTMLImportacion(datos.fecha)}</div>
+                  `
+                : `
+                    <div><strong>${escaparHTMLImportacion(item.archivo.name)}</strong></div>
+                    <div class="texto-error-importacion">${escaparHTMLImportacion(item.error)}</div>
+                  `;
+
+            return `<div class="${clase}">${detalle}</div>`;
+        }).join("");
+
+    listaImportacionMultiple.classList.remove("oculto");
+    btnGuardarPendiente.style.display =
+        validos > 0 ? "" : "none";
+}
 
 
 /* =========================================================
@@ -2261,7 +2341,7 @@ selectorPDF.addEventListener(
 
 async function leerAlbaranPDF(archivo) {
 
-
+    btnGuardarPendiente.style.display = "";
 
     try {
 
@@ -3730,339 +3810,187 @@ function mostrarDatos(datos) {
 
 
 btnGuardarPendiente.addEventListener(
-
     "click",
-
     async () => {
 
-
-
-        if (
-
-            !albaranActual ||
-
-            !archivoActual
-
-        ) {
-
-            return;
-
-        }
-
-
-
-
-
-        const propietarioActual =
-
-            albaranActual.empresa;
-
-
-        if (
-
-            propietarioActual !==
-
-            empresaActiva
-
-        ) {
-
-            alert(
-
-                "El albarán no pertenece al autónomo seleccionado. No se puede guardar."
-
-            );
-
-            return;
-
-        }
-
-
-
-
-
-        if (
-
-            albaranActual.numero ===
-
-            "No detectado"
-
-        ) {
-
-
-
-            alert(
-
-                "No se ha podido detectar el número del albarán."
-
-            );
-
-
-
-            return;
-
-
-
-        }
-
-
-
-
-
-        const albaranes =
-
-            obtenerAlbaranes();
-
-
-
-
-
-        const yaExiste =
-
-            albaranes.some(
-
-                albaran =>
-
-
-
-                    albaran.numero ===
-
-                        albaranActual.numero
-
-
-
-                    &&
-
-
-
-                    albaran.empresa ===
-
-                        empresaActiva
-
-                    &&
-
-                    albaran.estado !==
-
-                        "eliminado"
-
-            );
-
-
-
-
-
-        if (yaExiste) {
-
-
-
-            alert(
-
-                "El albarán " +
-
-                albaranActual.numero +
-
-                " ya está guardado en " +
-
-                EMPRESAS[
-
-                    empresaActiva
-
-                ].nombre +
-
-                "."
-
-            );
-
-
-
-            return;
-
-
-
-        }
-
-
-
-
-
-        try {
-
-
-
-            estadoLectura.textContent =
-
-                "Guardando albarán...";
-
-
-
-
-
-            const pdfBase64 =
-
-                await convertirArchivoBase64(
-
-                    archivoActual
-
+        /* IMPORTACIÓN MÚLTIPLE */
+        if (loteImportacion.length > 1) {
+            const validos =
+                loteImportacion.filter(item => item.valido);
+
+            if (!validos.length) {
+                return;
+            }
+
+            try {
+                estadoLectura.classList.remove("error");
+                estadoLectura.textContent =
+                    "Guardando " + validos.length + " albaranes...";
+
+                const albaranes = obtenerAlbaranes();
+                let guardados = 0;
+
+                for (const item of validos) {
+                    const pdfBase64 =
+                        await convertirArchivoBase64(item.archivo);
+
+                    albaranes.push({
+                        id:
+                            Date.now() + guardados,
+                        numero:
+                            item.datos.numero,
+                        cliente:
+                            item.datos.cliente,
+                        fecha:
+                            item.datos.fecha,
+                        estado:
+                            "pendiente",
+                        empresa:
+                            empresaActiva,
+                        nombreArchivo:
+                            item.archivo.name,
+                        pdf:
+                            pdfBase64,
+                        updatedAt:
+                            new Date().toISOString()
+                    });
+
+                    guardados++;
+                }
+
+                guardarAlbaranes(albaranes);
+                actualizarContadorPendientes();
+
+                alert(
+                    guardados +
+                    " albarán" +
+                    (guardados === 1 ? "" : "es") +
+                    " guardado" +
+                    (guardados === 1 ? "" : "s") +
+                    " en pendientes."
                 );
 
+                loteImportacion = [];
+                albaranActual = null;
+                archivoActual = null;
+                btnGuardarPendiente.textContent =
+                    "Guardar en pendientes";
+                btnGuardarPendiente.style.display = "";
+                mostrarInicio();
+            }
+            catch (error) {
+                console.error(error);
+                estadoLectura.textContent =
+                    "No se han podido guardar todos los albaranes.";
+                estadoLectura.classList.add("error");
+                alert(
+                    "Ha ocurrido un error al guardar los albaranes."
+                );
+            }
 
+            return;
+        }
 
+        /* IMPORTACIÓN INDIVIDUAL: conserva el funcionamiento anterior */
+        if (!albaranActual || !archivoActual) {
+            return;
+        }
 
+        const propietarioActual =
+            albaranActual.empresa;
+
+        if (propietarioActual !== empresaActiva) {
+            alert(
+                "El albarán no pertenece al autónomo seleccionado. No se puede guardar."
+            );
+            return;
+        }
+
+        if (albaranActual.numero === "No detectado") {
+            alert(
+                "No se ha podido detectar el número del albarán."
+            );
+            return;
+        }
+
+        const albaranes =
+            obtenerAlbaranes();
+
+        const yaExiste =
+            albaranes.some(
+                albaran =>
+                    albaran.numero === albaranActual.numero
+                    &&
+                    albaran.empresa === empresaActiva
+                    &&
+                    albaran.estado !== "eliminado"
+            );
+
+        if (yaExiste) {
+            alert(
+                "El albarán " +
+                albaranActual.numero +
+                " ya está guardado en " +
+                EMPRESAS[empresaActiva].nombre +
+                "."
+            );
+            return;
+        }
+
+        try {
+            estadoLectura.textContent =
+                "Guardando albarán...";
+
+            const pdfBase64 =
+                await convertirArchivoBase64(archivoActual);
 
             const nuevoAlbaran = {
-
-
-
                 id:
-
                     Date.now(),
-
-
-
                 numero:
-
                     albaranActual.numero,
-
-
-
                 cliente:
-
                     albaranActual.cliente,
-
-
-
                 fecha:
-
                     albaranActual.fecha,
-
-
-
                 estado:
-
                     "pendiente",
-
-
-
                 empresa:
-
                     empresaActiva,
-
-
-
                 nombreArchivo:
-
                     archivoActual.name,
-
-
-
                 pdf:
-
                     pdfBase64,
-
                 updatedAt:
                     new Date().toISOString()
-
-
-
             };
 
-
-
-
-
-            albaranes.push(
-
-                nuevoAlbaran
-
-            );
-
-
-
-
-
-            guardarAlbaranes(
-
-                albaranes
-
-            );
-
-
-
-
-
+            albaranes.push(nuevoAlbaran);
+            guardarAlbaranes(albaranes);
             actualizarContadorPendientes();
 
-
-
-
-
             alert(
-
                 "Albarán " +
-
                 nuevoAlbaran.numero +
-
                 " guardado en pendientes."
-
             );
-
-
-
-
 
             albaranActual = null;
-
-
-
             archivoActual = null;
-
-
-
+            loteImportacion = [];
             mostrarInicio();
-
-
-
         }
-
         catch (error) {
-
-
-
             console.error(error);
-
-
-
             estadoLectura.textContent =
-
                 "No se ha podido guardar.";
-
-
-
-            estadoLectura
-
-                .classList
-
-                .add("error");
-
-
-
+            estadoLectura.classList.add("error");
             alert(
-
                 "Ha ocurrido un error al guardar el albarán."
-
             );
-
-
-
         }
-
-
-
     }
-
 );
-
-
-
 
 
 /* =========================================================

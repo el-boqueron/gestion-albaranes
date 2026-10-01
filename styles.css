@@ -1448,3 +1448,36 @@ button {
     cursor: not-allowed;
 }
 
+
+
+/* =========================================================
+   IMPORTACIÓN MÚLTIPLE
+========================================================= */
+
+.lista-importacion-multiple {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.item-importacion-multiple {
+    background: #ffffff;
+    border: 1px solid #dce2e7;
+    border-radius: 12px;
+    padding: 13px 15px;
+    line-height: 1.4;
+}
+
+.item-importacion-multiple.valido {
+    border-left: 5px solid #166534;
+}
+
+.item-importacion-multiple.error {
+    border-left: 5px solid #b3261e;
+}
+
+.texto-error-importacion {
+    margin-top: 4px;
+    color: #b3261e;
+    font-weight: 700;
+}
