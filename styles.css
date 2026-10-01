@@ -1530,3 +1530,23 @@ button {
     margin-top: 12px;
     margin-bottom: 16px;
 }
+
+
+/* =========================================================
+   IMPORTACIÓN MÚLTIPLE V28 - BOTÓN GENERAL VISIBLE EN MÓVIL
+========================================================= */
+
+@media (max-width: 700px) {
+    #pantallaImportacion #btnGuardarPendiente {
+        position: sticky;
+        bottom: 10px;
+        z-index: 40;
+        width: 100%;
+        margin: 14px 0 16px;
+        box-shadow: 0 5px 18px rgba(0, 0, 0, 0.22);
+    }
+
+    #pantallaImportacion .lista-importacion-multiple {
+        padding-bottom: 4px;
+    }
+}
