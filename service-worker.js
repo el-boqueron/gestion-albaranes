@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v23";
+const CACHE_NAME = "gestion-albaranes-v25";
 
 const ARCHIVOS_APP = [
     "./",
@@ -47,31 +47,29 @@ self.addEventListener("fetch", event => {
     }
 
     event.respondWith(
-        caches.match(event.request)
-            .then(respuestaCache => {
-                if (respuestaCache) {
-                    return respuestaCache;
+        fetch(event.request)
+            .then(respuestaRed => {
+                if (
+                    respuestaRed &&
+                    respuestaRed.status === 200
+                ) {
+                    const copia = respuestaRed.clone();
+
+                    caches.open(CACHE_NAME)
+                        .then(cache => {
+                            cache.put(event.request, copia);
+                        });
                 }
 
-                return fetch(event.request)
-                    .then(respuestaRed => {
-                        if (
-                            !respuestaRed ||
-                            respuestaRed.status !== 200
-                        ) {
-                            return respuestaRed;
+                return respuestaRed;
+            })
+            .catch(() => {
+                return caches.match(event.request)
+                    .then(respuestaCache => {
+                        if (respuestaCache) {
+                            return respuestaCache;
                         }
 
-                        const copia = respuestaRed.clone();
-
-                        caches.open(CACHE_NAME)
-                            .then(cache => {
-                                cache.put(event.request, copia);
-                            });
-
-                        return respuestaRed;
-                    })
-                    .catch(() => {
                         if (event.request.mode === "navigate") {
                             return caches.match("./index.html");
                         }

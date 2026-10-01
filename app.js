@@ -533,7 +533,7 @@ async function sincronizarConGoogleDrive() {
         });
         actualizarContadorPendientes();
         if (!pantallaPendientes.classList.contains("oculto")) mostrarPendientes();
-        if (!pantallaClientes.classList.contains("oculto")) mostrarClientes();
+        if (!pantallaClientes.classList.contains("oculto")) btnVolverAlbaranesCliente.click();
         estadoGoogleDrive.textContent = "Google Drive: conectado y sincronizado ✓";
     } catch (error) {
         console.error("Error sincronizando con Google Drive:", error);
@@ -1717,6 +1717,148 @@ function mostrarInicio() {
 
 
 
+
+/* =========================================================
+   BOTÓN ATRÁS DEL SISTEMA
+   - Dentro de una pantalla: vuelve atrás.
+   - En Inicio: dos pulsaciones para salir.
+========================================================= */
+
+let ultimaPulsacionAtrasInicio = 0;
+let avisoSalidaTimer = null;
+
+function mostrarAvisoSalida() {
+    let aviso = document.getElementById("avisoDobleAtrasSalir");
+
+    if (!aviso) {
+        aviso = document.createElement("div");
+        aviso.id = "avisoDobleAtrasSalir";
+        aviso.textContent = "Pulsa Atrás otra vez para salir";
+        Object.assign(aviso.style, {
+            position: "fixed",
+            left: "50%",
+            bottom: "28px",
+            transform: "translateX(-50%)",
+            zIndex: "5000",
+            background: "rgba(20, 25, 30, 0.92)",
+            color: "#fff",
+            padding: "11px 16px",
+            borderRadius: "10px",
+            fontSize: "14px",
+            fontWeight: "700",
+            boxShadow: "0 4px 14px rgba(0,0,0,.25)",
+            pointerEvents: "none"
+        });
+        document.body.appendChild(aviso);
+    }
+
+    aviso.style.display = "block";
+
+    clearTimeout(avisoSalidaTimer);
+    avisoSalidaTimer = setTimeout(() => {
+        aviso.style.display = "none";
+    }, 1800);
+}
+
+function registrarEstadoNavegacionApp() {
+    if (!history.state?.gestionAlbaranes) {
+        history.replaceState(
+            { gestionAlbaranes: true, nivel: "inicio" },
+            ""
+        );
+        history.pushState(
+            { gestionAlbaranes: true, nivel: "app" },
+            ""
+        );
+    }
+}
+
+function estamosEnPantallaInicio() {
+    return !pantallaInicio.classList.contains("oculto");
+}
+
+function volverDentroDeLaApp() {
+    if (!pantallaFirma.classList.contains("oculto")) {
+        btnCancelarFirma.click();
+        return true;
+    }
+
+    if (!pantallaVisor.classList.contains("oculto")) {
+        btnVolverVisor.click();
+        return true;
+    }
+
+    if (!pantallaAlbaranesCliente.classList.contains("oculto")) {
+        btnVolverAlbaranesCliente.click();
+        return true;
+    }
+
+    if (!pantallaClientes.classList.contains("oculto")) {
+        mostrarInicio();
+        return true;
+    }
+
+    if (!pantallaPendientes.classList.contains("oculto")) {
+        mostrarInicio();
+        return true;
+    }
+
+    if (!pantallaImportacion.classList.contains("oculto")) {
+        mostrarInicio();
+        return true;
+    }
+
+    if (!pantallaConfiguracion.classList.contains("oculto")) {
+        pantallaConfiguracion.classList.add("oculto");
+        return true;
+    }
+
+    if (!pantallaCopiaSeguridad.classList.contains("oculto")) {
+        pantallaCopiaSeguridad.classList.add("oculto");
+        return true;
+    }
+
+    if (!pantallaEmpresas.classList.contains("oculto")) {
+        pantallaEmpresas.classList.add("oculto");
+        return true;
+    }
+
+    return false;
+}
+
+window.addEventListener("popstate", () => {
+    if (volverDentroDeLaApp()) {
+        history.pushState(
+            { gestionAlbaranes: true, nivel: "app" },
+            ""
+        );
+        return;
+    }
+
+    if (estamosEnPantallaInicio()) {
+        const ahora = Date.now();
+
+        if (ahora - ultimaPulsacionAtrasInicio <= 1800) {
+            ultimaPulsacionAtrasInicio = 0;
+            history.back();
+            return;
+        }
+
+        ultimaPulsacionAtrasInicio = ahora;
+        mostrarAvisoSalida();
+
+        history.pushState(
+            { gestionAlbaranes: true, nivel: "app" },
+            ""
+        );
+    }
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+    registrarEstadoNavegacionApp();
+});
+
+
 function mostrarImportacion() {
 
 
@@ -2145,8 +2287,6 @@ async function leerAlbaranPDF(archivo) {
 
             .add("oculto");
 
-        btnGuardarPendiente.disabled = true;
-
 
 
 
@@ -2351,6 +2491,79 @@ async function leerAlbaranPDF(archivo) {
 
 
 
+        const propietarioDetectado =
+
+            detectarPropietarioAlbaran(
+
+                textoCompleto
+
+            );
+
+
+        if (!propietarioDetectado) {
+
+            albaranActual = null;
+
+            estadoLectura.textContent =
+
+                "No se ha podido identificar con seguridad el autónomo del albarán. No se puede añadir.";
+
+            estadoLectura
+
+                .classList
+
+                .add("error");
+
+            datosAlbaran
+
+                .classList
+
+                .add("oculto");
+
+            return;
+
+        }
+
+
+        if (
+
+            propietarioDetectado !==
+
+            empresaActiva
+
+        ) {
+
+            albaranActual = null;
+
+            estadoLectura.textContent =
+
+                "Este albarán pertenece a " +
+
+                EMPRESAS[propietarioDetectado].nombre +
+
+                ". Estás trabajando en " +
+
+                EMPRESAS[empresaActiva].nombre +
+
+                ". No se puede añadir.";
+
+            estadoLectura
+
+                .classList
+
+                .add("error");
+
+            datosAlbaran
+
+                .classList
+
+                .add("oculto");
+
+            return;
+
+        }
+
+
         const datos =
 
             extraerDatosAlbaran(
@@ -2362,26 +2575,6 @@ async function leerAlbaranPDF(archivo) {
 
 
 
-
-        const empresaDetectada = detectarEmpresaDelAlbaran(textoCompleto);
-
-        if (!empresaDetectada) {
-            albaranActual = null;
-            btnGuardarPendiente.disabled = true;
-            estadoLectura.textContent = "No se ha podido identificar con seguridad el autónomo del albarán. No se puede añadir.";
-            estadoLectura.classList.add("error");
-            datosAlbaran.classList.add("oculto");
-            return;
-        }
-
-        if (empresaDetectada !== empresaActiva) {
-            albaranActual = null;
-            btnGuardarPendiente.disabled = true;
-            estadoLectura.textContent = "Este albarán pertenece a " + EMPRESAS[empresaDetectada].nombre + ". Estás trabajando en " + EMPRESAS[empresaActiva].nombre + ". No se puede añadir.";
-            estadoLectura.classList.add("error");
-            datosAlbaran.classList.add("oculto");
-            return;
-        }
 
         albaranActual = {
 
@@ -2414,8 +2607,6 @@ async function leerAlbaranPDF(archivo) {
 
 
 
-
-        btnGuardarPendiente.disabled = false;
 
         mostrarDatos(
 
@@ -2467,31 +2658,123 @@ async function leerAlbaranPDF(archivo) {
 
 
 
-function normalizarTextoIdentidad(texto) {
-    return String(texto || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").toUpperCase().trim();
+function normalizarIdentidadAlbaran(texto) {
+    return String(texto || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toUpperCase();
 }
 
-function detectarEmpresaDelAlbaran(texto) {
-    const normalizado = normalizarTextoIdentidad(texto);
-    const tieneCarlos = normalizado.includes("60213789L") || normalizado.includes("CARLOS EDUARDO ROJAS BUSTOS");
-    const tieneRobinson = normalizado.includes("60804545C") || normalizado.includes("ROBINSON ROJAS BUSTOS");
-    if (tieneCarlos && !tieneRobinson) return "boqueron";
-    if (tieneRobinson && !tieneCarlos) return "empresa2";
+
+function detectarPropietarioAlbaran(texto) {
+
+    const normalizado =
+        normalizarIdentidadAlbaran(texto);
+
+    const compacto =
+        normalizado.replace(/[^A-Z0-9]/g, "");
+
+
+    const esCarlos =
+        compacto.includes("60213789L")
+        ||
+        normalizado.includes(
+            "CARLOS EDUARDO ROJAS BUSTOS"
+        );
+
+
+    const esRobinson =
+        compacto.includes("60804545C")
+        ||
+        normalizado.includes(
+            "ROBINSON ROJAS BUSTOS"
+        );
+
+
+    if (esCarlos && !esRobinson) {
+        return "boqueron";
+    }
+
+    if (esRobinson && !esCarlos) {
+        return "empresa2";
+    }
+
     return null;
+
 }
+
+
+function puntuacionDatosAlbaran(datos) {
+
+    let puntos = 0;
+
+    if (
+        datos.numero &&
+        datos.numero !== "No detectado"
+    ) {
+        puntos += 3;
+    }
+
+    if (
+        datos.cliente &&
+        datos.cliente !== "No detectado"
+    ) {
+        puntos += 3;
+    }
+
+    if (
+        datos.fecha &&
+        datos.fecha !== "No detectada"
+    ) {
+        puntos += 1;
+    }
+
+    return puntos;
+
+}
+
 
 function extraerDatosAlbaran(texto) {
-    const pareceFormatoRobinson = /Cliente\s*:/i.test(texto) && /Fecha\s*:/i.test(texto);
-    const lectorPrincipal = pareceFormatoRobinson ? extraerDatosAlbaranRobinson : extraerDatosAlbaranCarlos;
-    const lectorAlternativo = pareceFormatoRobinson ? extraerDatosAlbaranCarlos : extraerDatosAlbaranRobinson;
-    let datos = lectorPrincipal(texto);
-    if (datos.numero === "No detectado" || datos.cliente === "No detectado" || datos.fecha === "No detectada") {
-        const alternativos = lectorAlternativo(texto);
-        if (datos.numero === "No detectado" && alternativos.numero !== "No detectado") datos.numero = alternativos.numero;
-        if (datos.cliente === "No detectado" && alternativos.cliente !== "No detectado") datos.cliente = alternativos.cliente;
-        if (datos.fecha === "No detectada" && alternativos.fecha !== "No detectada") datos.fecha = alternativos.fecha;
+
+    /*
+       El intérprete depende del FORMATO DEL PDF,
+       nunca del autónomo seleccionado.
+
+       Los dos perfiles pueden usar cualquiera de
+       los dos formatos.
+    */
+
+    const formatoConCliente =
+        /Cliente\s*:/i.test(texto);
+
+    const datosCarlos =
+        extraerDatosAlbaranCarlos(texto);
+
+    const datosRobinson =
+        extraerDatosAlbaranRobinson(texto);
+
+
+    if (formatoConCliente) {
+
+        if (
+            puntuacionDatosAlbaran(datosRobinson) >= 4
+        ) {
+            return datosRobinson;
+        }
+
+        return datosCarlos;
+
     }
-    return datos;
+
+
+    if (
+        puntuacionDatosAlbaran(datosCarlos) >= 4
+    ) {
+        return datosCarlos;
+    }
+
+    return datosRobinson;
+
 }
 
 
@@ -3470,10 +3753,31 @@ btnGuardarPendiente.addEventListener(
 
 
 
-        if (albaranActual.empresa !== empresaActiva) {
-            alert("El albarán no pertenece al autónomo seleccionado. No se puede guardar.");
+        const propietarioActual =
+
+            albaranActual.empresa;
+
+
+        if (
+
+            propietarioActual !==
+
+            empresaActiva
+
+        ) {
+
+            alert(
+
+                "El albarán no pertenece al autónomo seleccionado. No se puede guardar."
+
+            );
+
             return;
+
         }
+
+
+
 
 
         if (
@@ -4136,7 +4440,7 @@ async function liberarEspacioDriveTrasCopia() {
         actualizarContadorPendientes();
 
         if (!pantallaClientes.classList.contains("oculto")) {
-            mostrarClientes();
+            btnVolverAlbaranesCliente.click();
         }
 
         estadoCopiaSeguridad.textContent =
