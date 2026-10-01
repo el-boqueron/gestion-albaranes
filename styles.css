@@ -1481,3 +1481,52 @@ button {
     color: #b3261e;
     font-weight: 700;
 }
+
+
+/* =========================================================
+   IMPORTACIÓN MÚLTIPLE V27
+========================================================= */
+
+.item-importacion-multiple {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.contenido-item-importacion {
+    min-width: 0;
+    flex: 1;
+}
+
+.acciones-item-importacion {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.boton-anadir-individual {
+    border: 0;
+    border-radius: 9px;
+    padding: 8px 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.boton-eliminar-lote {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    font-size: 17px;
+    cursor: pointer;
+}
+
+#btnGuardarPendiente {
+    margin-top: 12px;
+    margin-bottom: 16px;
+}

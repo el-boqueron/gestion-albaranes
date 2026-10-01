@@ -2305,7 +2305,7 @@ function mostrarResultadoLoteImportacion() {
         ".";
 
     listaImportacionMultiple.innerHTML =
-        loteImportacion.map(item => {
+        loteImportacion.map((item, indice) => {
             const datos = item.datos || {};
             const clase = item.valido
                 ? "item-importacion-multiple valido"
@@ -2313,22 +2313,140 @@ function mostrarResultadoLoteImportacion() {
 
             const detalle = item.valido
                 ? `
-                    <div><strong>${escaparHTMLImportacion(datos.numero)}</strong></div>
-                    <div>${escaparHTMLImportacion(datos.cliente)}</div>
-                    <div>${escaparHTMLImportacion(datos.fecha)}</div>
+                    <div class="contenido-item-importacion">
+                        <div><strong>${escaparHTMLImportacion(datos.numero)}</strong></div>
+                        <div>${escaparHTMLImportacion(datos.cliente)}</div>
+                        <div>${escaparHTMLImportacion(datos.fecha)}</div>
+                    </div>
+                    <div class="acciones-item-importacion">
+                        <button
+                            type="button"
+                            class="boton-anadir-individual"
+                            data-indice="${indice}"
+                        >Añadir</button>
+                        <button
+                            type="button"
+                            class="boton-eliminar-lote"
+                            data-indice="${indice}"
+                            aria-label="Quitar de la lista"
+                            title="Quitar de la lista"
+                        >🗑️</button>
+                    </div>
                   `
                 : `
-                    <div><strong>${escaparHTMLImportacion(item.archivo.name)}</strong></div>
-                    <div class="texto-error-importacion">${escaparHTMLImportacion(item.error)}</div>
+                    <div class="contenido-item-importacion">
+                        <div><strong>${escaparHTMLImportacion(item.archivo.name)}</strong></div>
+                        <div class="texto-error-importacion">${escaparHTMLImportacion(item.error)}</div>
+                    </div>
+                    <div class="acciones-item-importacion">
+                        <button
+                            type="button"
+                            class="boton-eliminar-lote"
+                            data-indice="${indice}"
+                            aria-label="Quitar de la lista"
+                            title="Quitar de la lista"
+                        >🗑️</button>
+                    </div>
                   `;
 
             return `<div class="${clase}">${detalle}</div>`;
         }).join("");
 
-    listaImportacionMultiple.classList.remove("oculto");
+    listaImportacionMultiple.classList.toggle(
+        "oculto",
+        loteImportacion.length === 0
+    );
+
+    btnGuardarPendiente.textContent =
+        "Añadir todos a pendientes";
+
     btnGuardarPendiente.style.display =
         validos > 0 ? "" : "none";
 }
+
+
+async function guardarItemLote(indice) {
+    const item = loteImportacion[indice];
+
+    if (!item || !item.valido) {
+        return;
+    }
+
+    try {
+        const albaranes = obtenerAlbaranes();
+
+        const yaExiste =
+            albaranes.some(
+                albaran =>
+                    albaran.numero === item.datos.numero
+                    &&
+                    albaran.empresa === empresaActiva
+                    &&
+                    albaran.estado !== "eliminado"
+            );
+
+        if (yaExiste) {
+            item.valido = false;
+            item.error = "Ya está guardado.";
+            mostrarResultadoLoteImportacion();
+            return;
+        }
+
+        const pdfBase64 =
+            await convertirArchivoBase64(item.archivo);
+
+        albaranes.push({
+            id: Date.now(),
+            numero: item.datos.numero,
+            cliente: item.datos.cliente,
+            fecha: item.datos.fecha,
+            estado: "pendiente",
+            empresa: empresaActiva,
+            nombreArchivo: item.archivo.name,
+            pdf: pdfBase64,
+            updatedAt: new Date().toISOString()
+        });
+
+        guardarAlbaranes(albaranes);
+        actualizarContadorPendientes();
+
+        loteImportacion.splice(indice, 1);
+        mostrarResultadoLoteImportacion();
+
+        if (!loteImportacion.length) {
+            mostrarInicio();
+        }
+    }
+    catch (error) {
+        console.error(error);
+        alert("No se ha podido guardar este albarán.");
+    }
+}
+
+
+listaImportacionMultiple.addEventListener("click", async event => {
+    const botonEliminar =
+        event.target.closest(".boton-eliminar-lote");
+
+    if (botonEliminar) {
+        const indice =
+            Number(botonEliminar.dataset.indice);
+
+        loteImportacion.splice(indice, 1);
+        mostrarResultadoLoteImportacion();
+        return;
+    }
+
+    const botonAnadir =
+        event.target.closest(".boton-anadir-individual");
+
+    if (botonAnadir) {
+        botonAnadir.disabled = true;
+        const indice =
+            Number(botonAnadir.dataset.indice);
+        await guardarItemLote(indice);
+    }
+});
 
 
 /* =========================================================
@@ -3814,7 +3932,7 @@ btnGuardarPendiente.addEventListener(
     async () => {
 
         /* IMPORTACIÓN MÚLTIPLE */
-        if (loteImportacion.length > 1) {
+        if (loteImportacion.length > 0) {
             const validos =
                 loteImportacion.filter(item => item.valido);
 
