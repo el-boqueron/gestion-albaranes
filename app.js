@@ -6989,6 +6989,80 @@ btnCancelarFirma.addEventListener(
 
 
 
+let temporizadorEstadoDriveFondo = null;
+
+function mostrarEstadoDriveFondo(mensaje, duracion = 0) {
+    let aviso = document.getElementById("estadoDriveFondo");
+
+    if (!aviso) {
+        aviso = document.createElement("div");
+        aviso.id = "estadoDriveFondo";
+        aviso.className = "estado-drive-fondo";
+        document.body.appendChild(aviso);
+    }
+
+    aviso.textContent = mensaje;
+    aviso.classList.add("visible");
+    clearTimeout(temporizadorEstadoDriveFondo);
+
+    if (duracion > 0) {
+        temporizadorEstadoDriveFondo = setTimeout(() => {
+            aviso.classList.remove("visible");
+        }, duracion);
+    }
+}
+
+async function marcarSubidaDrivePendiente(albaran) {
+    try {
+        const albaranes = obtenerAlbaranes();
+        const indice = albaranes.findIndex(
+            item =>
+                item.id === albaran.id
+                &&
+                item.empresa === albaran.empresa
+        );
+
+        if (indice !== -1) {
+            albaranes[indice].pendienteSubidaDrive = true;
+            albaranes[indice].updatedAt = new Date().toISOString();
+            guardarAlbaranes(albaranes);
+        }
+    }
+    catch (error) {
+        console.error("No se pudo marcar la subida pendiente:", error);
+    }
+}
+
+async function subirFirmaDriveEnFondo(albaran) {
+    try {
+        const resultadoDrive = await subirPDFDrive(albaran);
+        await registrarSubidaDrive(albaran, resultadoDrive);
+
+        if (resultadoDrive.subido) {
+            mostrarEstadoDriveFondo(
+                "✓ " + albaran.numero + " subido a Drive",
+                2500
+            );
+            return;
+        }
+
+        await marcarSubidaDrivePendiente(albaran);
+        mostrarEstadoDriveFondo(
+            "⚠️ " + albaran.numero + " pendiente de subir a Drive",
+            4000
+        );
+    }
+    catch (error) {
+        console.error("Error subiendo firma a Drive en segundo plano:", error);
+        await marcarSubidaDrivePendiente(albaran);
+        mostrarEstadoDriveFondo(
+            "⚠️ " + albaran.numero + " pendiente de subir a Drive",
+            4000
+        );
+    }
+}
+
+
 btnConfirmarFirma.addEventListener(
 
     "click",
@@ -7067,99 +7141,20 @@ btnConfirmarFirma.addEventListener(
 
 
 
-            let mensajeDrive = "";
-            btnConfirmarFirma.textContent = "Subiendo a Google Drive...";
-
-            /*
-             * firmarPDFActual() ya ha guardado el PDF firmado.
-             * Evitamos una segunda escritura previa a Drive, que en móvil
-             * podía fallar después de que la firma ya estuviera guardada.
-             */
-            albaranAbierto.pendienteSubidaDrive = true;
-
-            try {
-                const resultadoDrive = await subirPDFDrive(albaranAbierto);
-                await registrarSubidaDrive(albaranAbierto, resultadoDrive);
-
-                if (resultadoDrive.subido) {
-                    mensajeDrive = "\nGuardado también en Google Drive.";
-                }
-            }
-            catch (errorDrive) {
-                console.error("Error subiendo a Google Drive:", errorDrive);
-
-                try {
-                    const pendientesDrive = obtenerAlbaranes();
-                    const indicePendiente = pendientesDrive.findIndex(
-                        albaran =>
-                            albaran.id === albaranAbierto.id
-                            &&
-                            albaran.empresa === albaranAbierto.empresa
-                    );
-
-                    if (indicePendiente !== -1) {
-                        pendientesDrive[indicePendiente].pendienteSubidaDrive = true;
-                        pendientesDrive[indicePendiente].updatedAt = new Date().toISOString();
-                        guardarAlbaranes(pendientesDrive);
-                        albaranAbierto = pendientesDrive[indicePendiente];
-                    }
-                }
-                catch (errorPendiente) {
-                    console.error(
-                        "No se pudo marcar la subida pendiente de Drive:",
-                        errorPendiente
-                    );
-                }
-
-                mensajeDrive =
-                    "\nEl PDF quedó firmado y guardado en la aplicación, pero no se pudo subir a Google Drive.";
-            }
-
-
-
-
+            const albaranParaDrive = { ...albaranAbierto };
+            albaranParaDrive.pendienteSubidaDrive = true;
 
             cerrarPantallaFirma();
-
-
-
-
-
             iframePDF.src = "";
-
-
-
-
-
             albaranAbierto = null;
-
-
-
-
-
             actualizarContadorPendientes();
-
-
-
-
-
             mostrarPantallaPendientes();
 
-
-
-
-
-            alert(
-
-                "Albarán " +
-
-                numeroFirmado +
-
-                " firmado correctamente." +
-
-                mensajeDrive
-
+            mostrarEstadoDriveFondo(
+                "☁️ Subiendo " + numeroFirmado + " a Drive…"
             );
+
+            void subirFirmaDriveEnFondo(albaranParaDrive);
 
 
 
