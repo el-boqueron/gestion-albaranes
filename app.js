@@ -603,7 +603,7 @@ const EMPRESAS = {
 
             x: 80,
 
-            y: 25,
+            y: 20,
 
             ancho: 170
 
@@ -625,7 +625,7 @@ const EMPRESAS = {
 
             x: 80,
 
-            y: 25,
+            y: 20,
 
             ancho: 170
 
