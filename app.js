@@ -601,9 +601,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 75,
+            x: 80,
 
-            y: 35,
+            y: 25,
 
             ancho: 170
 
@@ -623,9 +623,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 75,
+            x: 80,
 
-            y: 35,
+            y: 25,
 
             ancho: 170
 
