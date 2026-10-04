@@ -1639,3 +1639,58 @@ button {
         pointer-events: auto !important;
     }
 }
+
+
+/* =========================================================
+   ACABADO BOTÓN ABRIR EN DRIVE - V37
+========================================================= */
+.boton-abrir-en {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    text-decoration: none !important;
+}
+
+.logo-drive {
+    position: relative;
+    display: inline-block;
+    width: 20px;
+    height: 18px;
+    flex: 0 0 20px;
+}
+
+.logo-drive .drive-lado {
+    position: absolute;
+    display: block;
+    border-radius: 1px;
+}
+
+.logo-drive .drive-lado-izq {
+    left: 3px;
+    top: 0;
+    width: 6px;
+    height: 15px;
+    background: #0F9D58;
+    transform: skew(-30deg);
+    transform-origin: top;
+}
+
+.logo-drive .drive-lado-der {
+    right: 3px;
+    top: 0;
+    width: 6px;
+    height: 15px;
+    background: #F4B400;
+    transform: skew(30deg);
+    transform-origin: top;
+}
+
+.logo-drive .drive-lado-inf {
+    left: 4px;
+    bottom: 0;
+    width: 13px;
+    height: 6px;
+    background: #4285F4;
+    transform: skew(-30deg);
+}
