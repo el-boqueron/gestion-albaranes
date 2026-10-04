@@ -603,7 +603,7 @@ const EMPRESAS = {
 
             x: 80,
 
-            y: 20,
+            y: 35,
 
             ancho: 170
 
@@ -625,7 +625,7 @@ const EMPRESAS = {
 
             x: 80,
 
-            y: 20,
+            y: 35,
 
             ancho: 170
 
@@ -874,6 +874,11 @@ const btnGuardarPendiente =
 const btnFirmar =
 
     document.getElementById("btnFirmar");
+
+
+const btnAbrirEn =
+
+    document.getElementById("btnAbrirEn");
 
 
 
@@ -5450,6 +5455,10 @@ async function abrirAlbaranPendiente(
 
 
 
+    btnAbrirEn.style.display = "";
+
+
+
 
 
     mostrarVisor();
@@ -6297,6 +6306,74 @@ async function abrirAlbaranFirmado(
 
 
 
+
+
+/* =========================================================
+
+   ABRIR PDF EN OTRA APLICACIÓN
+
+========================================================= */
+
+btnAbrirEn.addEventListener(
+    "click",
+    async () => {
+        if (!albaranAbierto || !albaranAbierto.pdf) {
+            alert("No se encuentra el PDF de este albarán.");
+            return;
+        }
+
+        try {
+            const bytes = dataURLAUint8Array(albaranAbierto.pdf);
+            const nombreSeguro = String(
+                albaranAbierto.numero || "albaran"
+            ).replace(/[\\/:*?"<>|]/g, "-");
+
+            const archivo = new File(
+                [bytes],
+                nombreSeguro + ".pdf",
+                { type: "application/pdf" }
+            );
+
+            if (
+                navigator.share &&
+                (
+                    !navigator.canShare ||
+                    navigator.canShare({ files: [archivo] })
+                )
+            ) {
+                await navigator.share({
+                    files: [archivo],
+                    title: albaranAbierto.numero || "Albarán"
+                });
+                return;
+            }
+
+            const urlTemporal = URL.createObjectURL(archivo);
+            const enlace = document.createElement("a");
+            enlace.href = urlTemporal;
+            enlace.download = archivo.name;
+            enlace.target = "_blank";
+            document.body.appendChild(enlace);
+            enlace.click();
+            enlace.remove();
+
+            setTimeout(
+                () => URL.revokeObjectURL(urlTemporal),
+                60000
+            );
+        }
+        catch (error) {
+            if (error && error.name === "AbortError") {
+                return;
+            }
+
+            console.error("No se pudo abrir el PDF en otra aplicación:", error);
+            alert(
+                "No se ha podido abrir el PDF en otra aplicación desde este dispositivo."
+            );
+        }
+    }
+);
 
 
 /* =========================================================

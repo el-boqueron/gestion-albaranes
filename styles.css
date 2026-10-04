@@ -1563,3 +1563,29 @@ button {
     transition: opacity .18s ease, transform .18s ease;
 }
 .estado-drive-fondo.visible { opacity: 1; transform: translate(-50%, 0); }
+
+
+/* =========================================================
+   ABRIR EN OTRA APLICACIÓN - V33
+========================================================= */
+
+.acciones-visor {
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.boton-abrir-en {
+    border: 0;
+    background: transparent;
+    color: #52606d;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.boton-abrir-en:hover {
+    color: #263442;
+}
