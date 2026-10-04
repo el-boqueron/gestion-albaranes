@@ -6316,7 +6316,7 @@ async function abrirAlbaranFirmado(
 
 btnAbrirEn.addEventListener(
     "click",
-    async () => {
+    () => {
         if (!albaranAbierto || !albaranAbierto.pdf) {
             alert("No se encuentra el PDF de este albarán.");
             return;
@@ -6324,63 +6324,23 @@ btnAbrirEn.addEventListener(
 
         try {
             const bytes = dataURLAUint8Array(albaranAbierto.pdf);
-            const nombreSeguro = String(
-                albaranAbierto.numero || "albaran"
-            ).replace(/[\\/:*?"<>|]/g, "-");
-
-            const blobPDF = new Blob(
-                [bytes],
-                { type: "application/pdf" }
-            );
-
-            const archivo = new File(
-                [blobPDF],
-                nombreSeguro + ".pdf",
-                { type: "application/pdf" }
-            );
-
-            if (
-                typeof navigator.share === "function" &&
-                (
-                    typeof navigator.canShare !== "function" ||
-                    navigator.canShare({ files: [archivo] })
-                )
-            ) {
-                await navigator.share({
-                    files: [archivo],
-                    title: nombreSeguro,
-                    text: "Abrir este albarán en Google Drive"
-                });
-                return;
-            }
-
-            /*
-             * En navegadores que no permiten compartir archivos, descargamos
-             * el PDF. Desde Descargas se puede abrir con Google Drive.
-             */
+            const blobPDF = new Blob([bytes], { type: "application/pdf" });
             const urlTemporal = URL.createObjectURL(blobPDF);
+
             const enlace = document.createElement("a");
             enlace.href = urlTemporal;
-            enlace.download = archivo.name;
+            enlace.target = "_blank";
+            enlace.rel = "noopener noreferrer";
             document.body.appendChild(enlace);
             enlace.click();
             enlace.remove();
 
-            setTimeout(
-                () => URL.revokeObjectURL(urlTemporal),
-                60000
-            );
-
-            alert(
-                "El PDF se ha guardado en Descargas. Ábrelo desde allí con Google Drive."
-            );
+            setTimeout(() => URL.revokeObjectURL(urlTemporal), 120000);
         }
         catch (error) {
-            if (error && error.name === "AbortError") return;
-
-            console.error("No se pudo compartir el PDF:", error);
+            console.error("No se pudo abrir el PDF:", error);
             alert(
-                "No se ha podido enviar el PDF a otra aplicación."
+                "No se ha podido abrir el PDF. Revisa que el móvil tenga una aplicación configurada para abrir archivos PDF."
             );
         }
     }
