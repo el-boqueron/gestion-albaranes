@@ -601,7 +601,7 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 80,
+            x: 75,
 
             y: 35,
 
@@ -623,7 +623,7 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 80,
+            x: 75,
 
             y: 35,
 
@@ -6328,31 +6328,40 @@ btnAbrirEn.addEventListener(
                 albaranAbierto.numero || "albaran"
             ).replace(/[\\/:*?"<>|]/g, "-");
 
-            const archivo = new File(
+            const blobPDF = new Blob(
                 [bytes],
+                { type: "application/pdf" }
+            );
+
+            const archivo = new File(
+                [blobPDF],
                 nombreSeguro + ".pdf",
                 { type: "application/pdf" }
             );
 
             if (
-                navigator.share &&
+                typeof navigator.share === "function" &&
                 (
-                    !navigator.canShare ||
+                    typeof navigator.canShare !== "function" ||
                     navigator.canShare({ files: [archivo] })
                 )
             ) {
                 await navigator.share({
                     files: [archivo],
-                    title: albaranAbierto.numero || "Albarán"
+                    title: nombreSeguro,
+                    text: "Abrir este albarán en Google Drive"
                 });
                 return;
             }
 
-            const urlTemporal = URL.createObjectURL(archivo);
+            /*
+             * En navegadores que no permiten compartir archivos, descargamos
+             * el PDF. Desde Descargas se puede abrir con Google Drive.
+             */
+            const urlTemporal = URL.createObjectURL(blobPDF);
             const enlace = document.createElement("a");
             enlace.href = urlTemporal;
             enlace.download = archivo.name;
-            enlace.target = "_blank";
             document.body.appendChild(enlace);
             enlace.click();
             enlace.remove();
@@ -6361,15 +6370,17 @@ btnAbrirEn.addEventListener(
                 () => URL.revokeObjectURL(urlTemporal),
                 60000
             );
+
+            alert(
+                "El PDF se ha guardado en Descargas. Ábrelo desde allí con Google Drive."
+            );
         }
         catch (error) {
-            if (error && error.name === "AbortError") {
-                return;
-            }
+            if (error && error.name === "AbortError") return;
 
-            console.error("No se pudo abrir el PDF en otra aplicación:", error);
+            console.error("No se pudo compartir el PDF:", error);
             alert(
-                "No se ha podido abrir el PDF en otra aplicación desde este dispositivo."
+                "No se ha podido enviar el PDF a otra aplicación."
             );
         }
     }
@@ -6930,39 +6941,75 @@ function obtenerPuntoCanvas(
 
 
 
+    const margenTrazo = 8;
+
+
+
+    const xCalculada =
+
+        (
+
+            event.clientX -
+
+            rectangulo.left
+
+        )
+
+        *
+
+        escalaX;
+
+
+
+    const yCalculada =
+
+        (
+
+            event.clientY -
+
+            rectangulo.top
+
+        )
+
+        *
+
+        escalaY;
+
+
+
     return {
 
 
 
-        x:
+        x: Math.max(
 
-            (
+            margenTrazo,
 
-                event.clientX -
+            Math.min(
 
-                rectangulo.left
+                canvasFirma.width - margenTrazo,
 
-            )
-
-            *
-
-            escalaX,
-
-
-
-        y:
-
-            (
-
-                event.clientY -
-
-                rectangulo.top
+                xCalculada
 
             )
 
-            *
+        ),
 
-            escalaY
+
+
+        y: Math.max(
+
+            margenTrazo,
+
+            Math.min(
+
+                canvasFirma.height - margenTrazo,
+
+                yCalculada
+
+            )
+
+        )
 
 
 

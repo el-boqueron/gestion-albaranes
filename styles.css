@@ -1589,3 +1589,53 @@ button {
 .boton-abrir-en:hover {
     color: #263442;
 }
+
+
+/* =========================================================
+   BOTÓN GOOGLE DRIVE BAJO FIRMAR - V34
+========================================================= */
+
+.acciones-visor {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    padding: 10px 14px 12px !important;
+}
+
+.boton-abrir-en {
+    display: block;
+    width: auto;
+    min-height: 28px;
+    margin: 0 auto;
+    padding: 4px 12px;
+    border: 0;
+    background: transparent;
+    color: #315a8a;
+    font-size: 12px;
+    line-height: 18px;
+    font-weight: 700;
+    text-align: center;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+@media (max-width: 700px) {
+    .acciones-visor {
+        padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+    }
+
+    .boton-firmar {
+        flex: none !important;
+        width: 100% !important;
+        max-width: 600px !important;
+    }
+
+    .boton-abrir-en {
+        flex: none !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+    }
+}
