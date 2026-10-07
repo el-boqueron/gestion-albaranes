@@ -583,7 +583,11 @@ async function subirFirmadosPendientesDrive() {
             &&
             albaran.estado === "firmado"
             &&
-            albaran.pendienteSubidaDrive === true
+            (
+                albaran.pendienteSubidaDrive === true
+                || !albaran.driveFileId
+                || !albaran.fechaSubidaDrive
+            )
             &&
             albaran.pdf
     );
