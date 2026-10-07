@@ -576,25 +576,42 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
 }
 
 async function subirFirmadosPendientesDrive() {
-
-    const pendientes = obtenerAlbaranes().filter(
+    const firmados = obtenerAlbaranes().filter(
         albaran =>
             albaran
-            &&
-            albaran.estado === "firmado"
-            &&
-            (
-                albaran.pendienteSubidaDrive === true
-                || !albaran.driveFileId
-                || !albaran.fechaSubidaDrive
-            )
-            &&
-            albaran.pdf
+            && albaran.estado === "firmado"
+            && albaran.pdf
     );
 
-    for (const albaran of pendientes) {
-
+    for (const albaran of firmados) {
         try {
+            let necesitaSubida =
+                albaran.pendienteSubidaDrive === true
+                || !albaran.driveFileId
+                || !albaran.fechaSubidaDrive;
+
+            /*
+             * Recuperación de registros antiguos: una copia sincronizada puede
+             * conservar driveFileId/fechaSubidaDrive aunque el PDF real nunca
+             * llegara a quedar guardado en la carpeta esperada de Drive.
+             * Comprobamos el archivo real antes de darlo por subido.
+             */
+            if (!necesitaSubida) {
+                const archivoReal = await localizarPDFDriveAlbaran(albaran);
+                necesitaSubida = !archivoReal;
+
+                if (archivoReal && archivoReal.id !== albaran.driveFileId) {
+                    await registrarSubidaDrive(albaran, {
+                        subido: true,
+                        id: archivoReal.id,
+                        nombre: archivoReal.name,
+                        enlace: albaran.driveEnlace || ""
+                    });
+                }
+            }
+
+            if (!necesitaSubida) continue;
+
             const resultado = await subirPDFDrive(albaran);
             await registrarSubidaDrive(albaran, resultado);
         }
@@ -605,9 +622,7 @@ async function subirFirmadosPendientesDrive() {
                 error
             );
         }
-
     }
-
 }
 
 
