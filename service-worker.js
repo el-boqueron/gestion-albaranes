@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v37";
+const CACHE_NAME = "gestion-albaranes-v38";
 
 const ARCHIVOS_APP = [
     "./",
@@ -42,16 +42,15 @@ self.addEventListener("fetch", event => {
 
     const url = new URL(event.request.url);
 
-    if (url.origin !== self.location.origin) {
-        return;
-    }
-
     event.respondWith(
         fetch(event.request)
             .then(respuestaRed => {
                 if (
                     respuestaRed &&
-                    respuestaRed.status === 200
+                    (
+                        respuestaRed.status === 200 ||
+                        respuestaRed.type === "opaque"
+                    )
                 ) {
                     const copia = respuestaRed.clone();
 

@@ -76,13 +76,65 @@ async function peticionWorker(ruta, opciones = {}, requiereSesion = true) {
 
 async function validarSesionApp() {
     const token = obtenerTokenSesionApp();
-    if (!token) return false;
+
+    if (!token) {
+        return {
+            valida: false,
+            modoOffline: false
+        };
+    }
+
+    /*
+     * Si no hay conexión, conservamos la sesión ya iniciada en este
+     * dispositivo y permitimos trabajar con los datos locales.
+     */
+    if (!navigator.onLine) {
+        return {
+            valida: true,
+            modoOffline: true
+        };
+    }
+
     try {
         const respuesta = await peticionWorker("/session");
-        return respuesta.ok;
-    } catch (error) {
-        console.error("No se pudo comprobar la sesión:", error);
-        return false;
+
+        if (respuesta.ok) {
+            return {
+                valida: true,
+                modoOffline: false
+            };
+        }
+
+        /*
+         * Solo consideramos inválida la sesión cuando el servidor
+         * responde expresamente que no está autorizada.
+         */
+        if (respuesta.status === 401 || respuesta.status === 403) {
+            return {
+                valida: false,
+                modoOffline: false
+            };
+        }
+
+        /*
+         * Si el servidor o la red fallan temporalmente, no expulsamos
+         * al usuario: entramos con la sesión local ya guardada.
+         */
+        return {
+            valida: true,
+            modoOffline: true
+        };
+    }
+    catch (error) {
+        console.error(
+            "No se pudo comprobar la sesión. Se mantiene el acceso local:",
+            error
+        );
+
+        return {
+            valida: true,
+            modoOffline: true
+        };
     }
 }
 
@@ -174,13 +226,26 @@ btnGoogleDrive.addEventListener("click", async () => {
 });
 
 async function iniciarAccesoPrivado() {
-    if (await validarSesionApp()) {
+    const sesion = await validarSesionApp();
+
+    if (sesion.valida) {
         mostrarSeleccionAutonomo();
+
+        if (sesion.modoOffline || !navigator.onLine) {
+            googleAccessToken = null;
+            estadoGoogleDrive.textContent =
+                "Sin cobertura · trabajando en modo local";
+            btnGoogleDrive.textContent =
+                "☁️ Google Drive pendiente de conexión";
+            return;
+        }
+
         await prepararGoogleDriveAutomatico();
-    } else {
-        borrarTokenSesionApp();
-        mostrarLogin();
+        return;
     }
+
+    borrarTokenSesionApp();
+    mostrarLogin();
 }
 
 /* =========================================================
@@ -8056,12 +8121,37 @@ function escaparHTML(valor) {
 
 window.addEventListener("online", () => {
 
+    estadoGoogleDrive.textContent =
+        "Cobertura recuperada · conectando con Google Drive...";
+
     setTimeout(
-        () => {
-            sincronizarConGoogleDrive();
+        async () => {
+            try {
+                await prepararGoogleDriveAutomatico();
+            }
+            catch (error) {
+                console.error(
+                    "No se pudo recuperar la conexión con Google Drive:",
+                    error
+                );
+            }
         },
         1000
     );
+
+});
+
+
+window.addEventListener("offline", () => {
+
+    googleAccessToken = null;
+
+    if (obtenerTokenSesionApp()) {
+        estadoGoogleDrive.textContent =
+            "Sin cobertura · trabajando en modo local";
+        btnGoogleDrive.textContent =
+            "☁️ Google Drive pendiente de conexión";
+    }
 
 });
 
