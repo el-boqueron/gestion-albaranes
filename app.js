@@ -510,7 +510,11 @@ let omitirSincronizacionAutomatica = false;
 let revisionLocalSincronizacion = 0;
 let intervaloSincronizacionDispositivos = null;
 const CLAVE_SYNC_PENDIENTE = "gestionAlbaranesSyncPendiente";
-const INTERVALO_SYNC_DISPOSITIVOS_MS = 3000;
+const INTERVALO_SYNC_DISPOSITIVOS_MS = 2000;
+let carpetaRaizSincronizacionCache = null;
+let archivoSincronizacionCache = null;
+let modifiedTimeSincronizacionConocido = null;
+let consultaRemotaEnCurso = false;
 
 function haySincronizacionLocalPendiente() {
     return localStorage.getItem(CLAVE_SYNC_PENDIENTE) === "1";
@@ -534,9 +538,74 @@ function iniciarSincronizacionPeriodicaDispositivos() {
     if (intervaloSincronizacionDispositivos) return;
     intervaloSincronizacionDispositivos = setInterval(() => {
         if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
-            sincronizarConGoogleDrive();
+            comprobarCambiosRemotosRapido();
         }
     }, INTERVALO_SYNC_DISPOSITIVOS_MS);
+}
+
+async function obtenerReferenciaSincronizacionRapida() {
+    if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
+
+    if (!carpetaRaizSincronizacionCache) {
+        carpetaRaizSincronizacionCache = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
+    }
+
+    if (!archivoSincronizacionCache?.id) {
+        archivoSincronizacionCache = await buscarArchivoSincronizacionDrive(carpetaRaizSincronizacionCache);
+    }
+
+    return archivoSincronizacionCache;
+}
+
+async function comprobarCambiosRemotosRapido(forzar = false) {
+    if (!obtenerTokenSesionApp() || !navigator.onLine || consultaRemotaEnCurso || sincronizacionEnCurso) return false;
+
+    consultaRemotaEnCurso = true;
+    try {
+        const archivo = await obtenerReferenciaSincronizacionRapida();
+        if (!archivo?.id) return false;
+
+        const respuestaMeta = await peticionDrive(
+            `https://www.googleapis.com/drive/v3/files/${archivo.id}?fields=id,name,modifiedTime`
+        );
+        if (!respuestaMeta.ok) throw new Error("No se pudo comprobar la sincronización remota: " + await respuestaMeta.text());
+        const meta = await respuestaMeta.json();
+
+        if (!forzar && modifiedTimeSincronizacionConocido && meta.modifiedTime === modifiedTimeSincronizacionConocido) {
+            return false;
+        }
+
+        const remoto = await descargarDatosSincronizacionDrive(meta);
+        const combinados = combinarAlbaranes(
+            obtenerAlbaranes(),
+            Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
+        );
+
+        omitirSincronizacionAutomatica = true;
+        try {
+            localStorage.setItem("albaranes", JSON.stringify(combinados));
+        } finally {
+            omitirSincronizacionAutomatica = false;
+        }
+
+        modifiedTimeSincronizacionConocido = meta.modifiedTime || remoto?.actualizado || new Date().toISOString();
+        archivoSincronizacionCache = { ...archivo, ...meta };
+
+        actualizarContadorPendientes();
+        if (!pantallaPendientes.classList.contains("oculto")) mostrarPendientes();
+        if (!pantallaClientes.classList.contains("oculto")) btnVolverAlbaranesCliente.click();
+
+        if (!haySincronizacionLocalPendiente()) {
+            estadoGoogleDrive.textContent = "Google Drive: conectado y sincronizado ✓";
+        }
+        return true;
+    } catch (error) {
+        console.error("Error comprobando cambios remotos:", error);
+        archivoSincronizacionCache = null;
+        return false;
+    } finally {
+        consultaRemotaEnCurso = false;
+    }
 }
 
 
@@ -692,7 +761,9 @@ async function sincronizarConGoogleDrive() {
         await subirFirmadosPendientesDrive();
 
         const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
+        carpetaRaizSincronizacionCache = carpetaRaiz;
         let archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+        if (archivo?.id) archivoSincronizacionCache = archivo;
         let remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
 
         /*
@@ -724,11 +795,15 @@ async function sincronizarConGoogleDrive() {
             omitirSincronizacionAutomatica = false;
         }
 
-        await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
+        const resultadoSubidaSync = await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
             version: 1,
             actualizado: new Date().toISOString(),
             albaranes: combinados
         });
+        if (resultadoSubidaSync?.id) {
+            archivoSincronizacionCache = resultadoSubidaSync;
+            modifiedTimeSincronizacionConocido = resultadoSubidaSync.modifiedTime || modifiedTimeSincronizacionConocido;
+        }
 
         /*
          * Verificación rápida: releemos el JSON después de escribir y volvemos
@@ -737,6 +812,8 @@ async function sincronizarConGoogleDrive() {
          */
         const archivoVerificacion = await buscarArchivoSincronizacionDrive(carpetaRaiz);
         if (archivoVerificacion?.id) {
+            archivoSincronizacionCache = archivoVerificacion;
+            modifiedTimeSincronizacionConocido = archivoVerificacion.modifiedTime || modifiedTimeSincronizacionConocido;
             const remotoVerificacion = await descargarDatosSincronizacionDrive(archivoVerificacion);
             const finales = combinarAlbaranes(
                 obtenerAlbaranes(),
@@ -8313,13 +8390,13 @@ window.addEventListener("offline", () => {
 
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
-        sincronizarConGoogleDrive();
+        comprobarCambiosRemotosRapido(true);
     }
 });
 
 window.addEventListener("focus", () => {
     if (navigator.onLine && obtenerTokenSesionApp()) {
-        sincronizarConGoogleDrive();
+        comprobarCambiosRemotosRapido(true);
     }
 });
 
