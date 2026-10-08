@@ -748,7 +748,7 @@ async function sincronizarConGoogleDrive() {
 
     if (sincronizacionEnCurso) {
         clearTimeout(temporizadorSincronizacion);
-        temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 1200);
+        temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 500);
         return false;
     }
 
@@ -758,30 +758,22 @@ async function sincronizarConGoogleDrive() {
     try {
         if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
 
-        await subirFirmadosPendientesDrive();
-
+        /*
+         * V45: primero sincronizamos el estado ligero de los albaranes.
+         * Antes se comprobaban/subían los PDF firmados antes de publicar un
+         * alta/borrado/cambio de pendiente. Eso podía retrasar muchos segundos
+         * la actualización que debían recibir los otros dispositivos.
+         */
         const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
         carpetaRaizSincronizacionCache = carpetaRaiz;
-        let archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+
+        let archivo = archivoSincronizacionCache?.id
+            ? archivoSincronizacionCache
+            : await buscarArchivoSincronizacionDrive(carpetaRaiz);
+
         if (archivo?.id) archivoSincronizacionCache = archivo;
-        let remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
 
-        /*
-         * Antes de mezclar, volvemos a consultar el archivo de Drive. Esto
-         * reduce la ventana en la que otro móvil/ordenador puede haber escrito
-         * un alta, una firma o un borrado después de nuestra primera lectura.
-         */
-        const archivoMasReciente = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        if (archivoMasReciente?.id) {
-            archivo = archivoMasReciente;
-            remoto = await descargarDatosSincronizacionDrive(archivoMasReciente);
-        }
-
-        /*
-         * Se vuelve a leer el estado local justo antes de combinar para no
-         * perder un albarán que se haya guardado mientras la sincronización
-         * estaba esperando respuestas de red.
-         */
+        const remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
         const combinados = combinarAlbaranes(
             obtenerAlbaranes(),
             Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
@@ -790,8 +782,7 @@ async function sincronizarConGoogleDrive() {
         omitirSincronizacionAutomatica = true;
         try {
             localStorage.setItem("albaranes", JSON.stringify(combinados));
-        }
-        finally {
+        } finally {
             omitirSincronizacionAutomatica = false;
         }
 
@@ -800,39 +791,18 @@ async function sincronizarConGoogleDrive() {
             actualizado: new Date().toISOString(),
             albaranes: combinados
         });
+
         if (resultadoSubidaSync?.id) {
             archivoSincronizacionCache = resultadoSubidaSync;
-            modifiedTimeSincronizacionConocido = resultadoSubidaSync.modifiedTime || modifiedTimeSincronizacionConocido;
-        }
-
-        /*
-         * Verificación rápida: releemos el JSON después de escribir y volvemos
-         * a mezclarlo con el estado local. Así un borrado/firma/alta recibido
-         * durante la sincronización se refleja sin esperar al siguiente ciclo.
-         */
-        const archivoVerificacion = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        if (archivoVerificacion?.id) {
-            archivoSincronizacionCache = archivoVerificacion;
-            modifiedTimeSincronizacionConocido = archivoVerificacion.modifiedTime || modifiedTimeSincronizacionConocido;
-            const remotoVerificacion = await descargarDatosSincronizacionDrive(archivoVerificacion);
-            const finales = combinarAlbaranes(
-                obtenerAlbaranes(),
-                Array.isArray(remotoVerificacion?.albaranes) ? remotoVerificacion.albaranes : []
-            );
-            omitirSincronizacionAutomatica = true;
-            try {
-                localStorage.setItem("albaranes", JSON.stringify(finales));
-            }
-            finally {
-                omitirSincronizacionAutomatica = false;
-            }
+            modifiedTimeSincronizacionConocido =
+                resultadoSubidaSync.modifiedTime || modifiedTimeSincronizacionConocido;
         }
 
         if (revisionLocalSincronizacion === revisionAlEmpezar) {
             confirmarSincronizacionLocal();
         } else {
             clearTimeout(temporizadorSincronizacion);
-            temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 500);
+            temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 300);
         }
 
         actualizarContadorPendientes();
@@ -842,6 +812,17 @@ async function sincronizarConGoogleDrive() {
         estadoGoogleDrive.textContent = haySincronizacionLocalPendiente()
             ? "Pendientes: sincronizando entre dispositivos..."
             : "Google Drive: conectado y sincronizado ✓";
+
+        /*
+         * Los PDF firmados se comprueban después, en segundo plano. Así nunca
+         * bloquean la propagación rápida de altas y eliminaciones de pendientes.
+         */
+        setTimeout(() => {
+            if (!navigator.onLine || !obtenerTokenSesionApp()) return;
+            subirFirmadosPendientesDrive().catch(error => {
+                console.error("Error sincronizando PDF firmados en segundo plano:", error);
+            });
+        }, 50);
 
         return true;
     }
@@ -854,7 +835,7 @@ async function sincronizarConGoogleDrive() {
         clearTimeout(temporizadorSincronizacion);
         temporizadorSincronizacion = setTimeout(() => {
             if (navigator.onLine) sincronizarConGoogleDrive();
-        }, 5000);
+        }, 3000);
 
         return false;
     }
