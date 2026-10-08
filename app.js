@@ -159,6 +159,7 @@ async function prepararGoogleDriveAutomatico() {
         estadoGoogleDrive.textContent = "Google Drive: conectado automáticamente ✓";
         btnGoogleDrive.textContent = "☁️ Google Drive conectado ✓";
         await sincronizarConGoogleDrive();
+        iniciarSincronizacionPeriodicaDispositivos();
     } catch (error) {
         console.error("Error preparando Google Drive:", error);
         estadoGoogleDrive.textContent = "Google Drive: no disponible";
@@ -230,6 +231,20 @@ async function iniciarAccesoPrivado() {
 
     if (sesion.valida) {
         mostrarSeleccionAutonomo();
+
+        if (!sesion.modoOffline && navigator.onLine) {
+            estadoGoogleDrive.textContent =
+                "Sincronizando pendientes entre dispositivos...";
+
+            /*
+             * Si este dispositivo arranca sin copia local, no mostramos un
+             * 0 provisional que pueda confundirse con que no hay albaranes.
+             * El contador definitivo se coloca al terminar la sincronización.
+             */
+            if (obtenerAlbaranes().length === 0) {
+                contadorPendientes.textContent = "…";
+            }
+        }
 
         if (sesion.modoOffline || !navigator.onLine) {
             googleAccessToken = null;
@@ -492,6 +507,38 @@ const NOMBRE_ARCHIVO_SINCRONIZACION = "gestion-albaranes-data.json";
 let sincronizacionEnCurso = false;
 let temporizadorSincronizacion = null;
 let omitirSincronizacionAutomatica = false;
+let revisionLocalSincronizacion = 0;
+let intervaloSincronizacionDispositivos = null;
+const CLAVE_SYNC_PENDIENTE = "gestionAlbaranesSyncPendiente";
+const INTERVALO_SYNC_DISPOSITIVOS_MS = 3000;
+
+function haySincronizacionLocalPendiente() {
+    return localStorage.getItem(CLAVE_SYNC_PENDIENTE) === "1";
+}
+
+function marcarSincronizacionLocalPendiente() {
+    localStorage.setItem(CLAVE_SYNC_PENDIENTE, "1");
+    revisionLocalSincronizacion++;
+    if (navigator.onLine && obtenerTokenSesionApp()) {
+        estadoGoogleDrive.textContent = "Pendientes: sincronizando entre dispositivos...";
+    } else if (obtenerTokenSesionApp()) {
+        estadoGoogleDrive.textContent = "Sin cobertura · pendientes por sincronizar";
+    }
+}
+
+function confirmarSincronizacionLocal() {
+    localStorage.removeItem(CLAVE_SYNC_PENDIENTE);
+}
+
+function iniciarSincronizacionPeriodicaDispositivos() {
+    if (intervaloSincronizacionDispositivos) return;
+    intervaloSincronizacionDispositivos = setInterval(() => {
+        if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
+            sincronizarConGoogleDrive();
+        }
+    }, INTERVALO_SYNC_DISPOSITIVOS_MS);
+}
+
 
 function claveUnicaAlbaran(albaran) {
     return `${albaran.empresa || "boqueron"}::${albaran.numero || albaran.id}`;
@@ -628,39 +675,127 @@ async function subirFirmadosPendientesDrive() {
 
 
 async function sincronizarConGoogleDrive() {
-    if (sincronizacionEnCurso || !obtenerTokenSesionApp()) return;
+    if (!obtenerTokenSesionApp() || !navigator.onLine) return false;
+
+    if (sincronizacionEnCurso) {
+        clearTimeout(temporizadorSincronizacion);
+        temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 1200);
+        return false;
+    }
+
     sincronizacionEnCurso = true;
+    const revisionAlEmpezar = revisionLocalSincronizacion;
+
     try {
         if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
 
         await subirFirmadosPendientesDrive();
 
         const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
-        const archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        const remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
-        const combinados = combinarAlbaranes(obtenerAlbaranes(), Array.isArray(remoto?.albaranes) ? remoto.albaranes : []);
+        let archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+        let remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
+
+        /*
+         * Antes de mezclar, volvemos a consultar el archivo de Drive. Esto
+         * reduce la ventana en la que otro móvil/ordenador puede haber escrito
+         * un alta, una firma o un borrado después de nuestra primera lectura.
+         */
+        const archivoMasReciente = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+        if (archivoMasReciente?.id) {
+            archivo = archivoMasReciente;
+            remoto = await descargarDatosSincronizacionDrive(archivoMasReciente);
+        }
+
+        /*
+         * Se vuelve a leer el estado local justo antes de combinar para no
+         * perder un albarán que se haya guardado mientras la sincronización
+         * estaba esperando respuestas de red.
+         */
+        const combinados = combinarAlbaranes(
+            obtenerAlbaranes(),
+            Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
+        );
+
         omitirSincronizacionAutomatica = true;
-        try { localStorage.setItem("albaranes", JSON.stringify(combinados)); }
-        finally { omitirSincronizacionAutomatica = false; }
+        try {
+            localStorage.setItem("albaranes", JSON.stringify(combinados));
+        }
+        finally {
+            omitirSincronizacionAutomatica = false;
+        }
+
         await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
-            version: 1, actualizado: new Date().toISOString(), albaranes: combinados
+            version: 1,
+            actualizado: new Date().toISOString(),
+            albaranes: combinados
         });
+
+        /*
+         * Verificación rápida: releemos el JSON después de escribir y volvemos
+         * a mezclarlo con el estado local. Así un borrado/firma/alta recibido
+         * durante la sincronización se refleja sin esperar al siguiente ciclo.
+         */
+        const archivoVerificacion = await buscarArchivoSincronizacionDrive(carpetaRaiz);
+        if (archivoVerificacion?.id) {
+            const remotoVerificacion = await descargarDatosSincronizacionDrive(archivoVerificacion);
+            const finales = combinarAlbaranes(
+                obtenerAlbaranes(),
+                Array.isArray(remotoVerificacion?.albaranes) ? remotoVerificacion.albaranes : []
+            );
+            omitirSincronizacionAutomatica = true;
+            try {
+                localStorage.setItem("albaranes", JSON.stringify(finales));
+            }
+            finally {
+                omitirSincronizacionAutomatica = false;
+            }
+        }
+
+        if (revisionLocalSincronizacion === revisionAlEmpezar) {
+            confirmarSincronizacionLocal();
+        } else {
+            clearTimeout(temporizadorSincronizacion);
+            temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 500);
+        }
+
         actualizarContadorPendientes();
         if (!pantallaPendientes.classList.contains("oculto")) mostrarPendientes();
         if (!pantallaClientes.classList.contains("oculto")) btnVolverAlbaranesCliente.click();
-        estadoGoogleDrive.textContent = "Google Drive: conectado y sincronizado ✓";
-    } catch (error) {
+
+        estadoGoogleDrive.textContent = haySincronizacionLocalPendiente()
+            ? "Pendientes: sincronizando entre dispositivos..."
+            : "Google Drive: conectado y sincronizado ✓";
+
+        return true;
+    }
+    catch (error) {
         console.error("Error sincronizando con Google Drive:", error);
-        estadoGoogleDrive.textContent = "Google Drive: conectado · sincronización pendiente";
-    } finally {
+        estadoGoogleDrive.textContent = haySincronizacionLocalPendiente()
+            ? "⚠️ Hay cambios pendientes de sincronizar"
+            : "Google Drive: conectado · sincronización pendiente";
+
+        clearTimeout(temporizadorSincronizacion);
+        temporizadorSincronizacion = setTimeout(() => {
+            if (navigator.onLine) sincronizarConGoogleDrive();
+        }, 5000);
+
+        return false;
+    }
+    finally {
         sincronizacionEnCurso = false;
     }
 }
 
 function programarSincronizacionDrive() {
     if (omitirSincronizacionAutomatica || !obtenerTokenSesionApp()) return;
+
+    marcarSincronizacionLocalPendiente();
     clearTimeout(temporizadorSincronizacion);
-    temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 800);
+
+    if (!navigator.onLine) return;
+
+    /* Los pendientes nuevos intentan salir prácticamente al instante. */
+    temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 150);
 }
 
 /* =========================================================
@@ -8176,4 +8311,25 @@ window.addEventListener("offline", () => {
 
 
 
-window.addEventListener("DOMContentLoaded", () => { iniciarAccesoPrivado(); });
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
+        sincronizarConGoogleDrive();
+    }
+});
+
+window.addEventListener("focus", () => {
+    if (navigator.onLine && obtenerTokenSesionApp()) {
+        sincronizarConGoogleDrive();
+    }
+});
+
+window.addEventListener("beforeunload", event => {
+    if (!haySincronizacionLocalPendiente()) return;
+    event.preventDefault();
+    event.returnValue = "";
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+    iniciarSincronizacionPeriodicaDispositivos();
+    iniciarAccesoPrivado();
+});
