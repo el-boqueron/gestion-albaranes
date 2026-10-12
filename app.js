@@ -158,15 +158,8 @@ async function prepararGoogleDriveAutomatico() {
         await obtenerTokenGoogleDesdeWorker();
         estadoGoogleDrive.textContent = "Google Drive: conectado automáticamente ✓";
         btnGoogleDrive.textContent = "☁️ Google Drive conectado ✓";
-
-        /*
-         * v46: al abrir la app damos prioridad a RECIBIR los cambios de
-         * pendientes. Es una lectura ligera y evita esperar a que termine
-         * toda la sincronización completa antes de actualizar el contador.
-         */
-        await comprobarCambiosRemotosRapido(true);
-        iniciarSincronizacionPeriodicaDispositivos();
         await sincronizarConGoogleDrive();
+        iniciarSincronizacionPeriodicaDispositivos();
     } catch (error) {
         console.error("Error preparando Google Drive:", error);
         estadoGoogleDrive.textContent = "Google Drive: no disponible";
@@ -517,7 +510,7 @@ let omitirSincronizacionAutomatica = false;
 let revisionLocalSincronizacion = 0;
 let intervaloSincronizacionDispositivos = null;
 const CLAVE_SYNC_PENDIENTE = "gestionAlbaranesSyncPendiente";
-const INTERVALO_SYNC_DISPOSITIVOS_MS = 1000;
+const INTERVALO_SYNC_DISPOSITIVOS_MS = 2000;
 let carpetaRaizSincronizacionCache = null;
 let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
@@ -573,8 +566,7 @@ async function comprobarCambiosRemotosRapido(forzar = false) {
         if (!archivo?.id) return false;
 
         const respuestaMeta = await peticionDrive(
-            `https://www.googleapis.com/drive/v3/files/${archivo.id}?fields=id,name,modifiedTime`,
-            { cache: "no-store" }
+            `https://www.googleapis.com/drive/v3/files/${archivo.id}?fields=id,name,modifiedTime`
         );
         if (!respuestaMeta.ok) throw new Error("No se pudo comprobar la sincronización remota: " + await respuestaMeta.text());
         const meta = await respuestaMeta.json();
@@ -669,7 +661,7 @@ async function buscarArchivoSincronizacionDrive(carpetaRaiz) {
 
 async function descargarDatosSincronizacionDrive(archivo) {
     if (!archivo?.id) return null;
-    const respuesta = await peticionDrive(`https://www.googleapis.com/drive/v3/files/${archivo.id}?alt=media`, { cache: "no-store" });
+    const respuesta = await peticionDrive(`https://www.googleapis.com/drive/v3/files/${archivo.id}?alt=media`);
     if (!respuesta.ok) throw new Error("No se pudieron descargar los datos sincronizados: " + await respuesta.text());
     return respuesta.json();
 }
@@ -899,7 +891,7 @@ const EMPRESAS = {
 
         id: "boqueron",
 
-        nombre: "Carlos Eduardo",
+        nombre: "Carlos Eduardo Rojas Bustos",
 
 
 
@@ -951,7 +943,11 @@ function cargarConfiguracionEmpresas() {
         if (!guardada) return;
 
         if (typeof guardada.boqueron === "string" && guardada.boqueron.trim()) {
-            EMPRESAS.boqueron.nombre = guardada.boqueron.trim();
+            const nombreCarlosGuardado = guardada.boqueron.trim();
+            EMPRESAS.boqueron.nombre =
+                nombreCarlosGuardado === "Carlos Eduardo"
+                    ? "Carlos Eduardo Rojas Bustos"
+                    : nombreCarlosGuardado;
         }
 
         if (typeof guardada.empresa2 === "string" && guardada.empresa2.trim()) {
