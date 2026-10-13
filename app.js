@@ -406,11 +406,17 @@ async function buscarPDFDrive(nombre, parentId) {
 }
 
 async function subirPDFDrive(albaran) {
+    const pdfDisponible = await obtenerPDFAlbaran(albaran);
+    if (!pdfDisponible) throw new Error("No se encuentra el PDF del albarán.");
+    albaran = { ...albaran, pdf: pdfDisponible };
+
     if (!googleAccessToken) {
         await obtenerTokenGoogleDesdeWorker();
     }
 
-    const empresa = EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa";
+    const empresa = albaran.empresa === "boqueron"
+        ? "Carlos Eduardo Rojas Bustos"
+        : (EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa");
     const cliente = albaran.cliente || "Cliente sin nombre";
 
     const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
@@ -581,9 +587,10 @@ async function comprobarCambiosRemotosRapido(forzar = false) {
             Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
         );
 
+        await guardarPDFsIncluidosEnIndexedDB(combinados);
         omitirSincronizacionAutomatica = true;
         try {
-            localStorage.setItem("albaranes", JSON.stringify(combinados));
+            guardarAlbaranesSoloLocal(combinados);
         } finally {
             omitirSincronizacionAutomatica = false;
         }
@@ -696,7 +703,6 @@ async function subirFirmadosPendientesDrive() {
         albaran =>
             albaran
             && albaran.estado === "firmado"
-            && albaran.pdf
     );
 
     for (const albaran of firmados) {
@@ -787,18 +793,20 @@ async function sincronizarConGoogleDrive() {
             Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
         );
 
+        await guardarPDFsIncluidosEnIndexedDB(combinados);
         omitirSincronizacionAutomatica = true;
         try {
-            localStorage.setItem("albaranes", JSON.stringify(combinados));
+            guardarAlbaranesSoloLocal(combinados);
         }
         finally {
             omitirSincronizacionAutomatica = false;
         }
 
+        const combinadosConPDF = await hidratarAlbaranesConPDF(combinados);
         const resultadoSubidaSync = await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
             version: 1,
             actualizado: new Date().toISOString(),
-            albaranes: combinados
+            albaranes: combinadosConPDF
         });
         if (resultadoSubidaSync?.id) {
             archivoSincronizacionCache = resultadoSubidaSync;
@@ -819,9 +827,10 @@ async function sincronizarConGoogleDrive() {
                 obtenerAlbaranes(),
                 Array.isArray(remotoVerificacion?.albaranes) ? remotoVerificacion.albaranes : []
             );
+            await guardarPDFsIncluidosEnIndexedDB(finales);
             omitirSincronizacionAutomatica = true;
             try {
-                localStorage.setItem("albaranes", JSON.stringify(finales));
+                guardarAlbaranesSoloLocal(finales);
             }
             finally {
                 omitirSincronizacionAutomatica = false;
@@ -943,11 +952,7 @@ function cargarConfiguracionEmpresas() {
         if (!guardada) return;
 
         if (typeof guardada.boqueron === "string" && guardada.boqueron.trim()) {
-            const nombreCarlosGuardado = guardada.boqueron.trim();
-            EMPRESAS.boqueron.nombre =
-                nombreCarlosGuardado === "Carlos Eduardo"
-                    ? "Carlos Eduardo Rojas Bustos"
-                    : nombreCarlosGuardado;
+            EMPRESAS.boqueron.nombre = "Carlos Eduardo Rojas Bustos";
         }
 
         if (typeof guardada.empresa2 === "string" && guardada.empresa2.trim()) {
@@ -2730,15 +2735,19 @@ async function guardarItemLote(indice) {
         const pdfBase64 =
             await convertirArchivoBase64(item.archivo);
 
+        const idNuevo = Date.now();
+        const pdfKey = clavePDFLocal(empresaActiva, idNuevo);
+        await guardarPDFIndexedDB(pdfKey, pdfBase64);
+
         albaranes.push({
-            id: Date.now(),
+            id: idNuevo,
             numero: item.datos.numero,
             cliente: item.datos.cliente,
             fecha: item.datos.fecha,
             estado: "pendiente",
             empresa: empresaActiva,
             nombreArchivo: item.archivo.name,
-            pdf: pdfBase64,
+            pdfKey: pdfKey,
             updatedAt: new Date().toISOString()
         });
 
@@ -4287,9 +4296,13 @@ btnGuardarPendiente.addEventListener(
                     const pdfBase64 =
                         await convertirArchivoBase64(item.archivo);
 
+                    const idNuevo = Date.now() + guardados;
+                    const pdfKey = clavePDFLocal(empresaActiva, idNuevo);
+                    await guardarPDFIndexedDB(pdfKey, pdfBase64);
+
                     albaranes.push({
                         id:
-                            Date.now() + guardados,
+                            idNuevo,
                         numero:
                             item.datos.numero,
                         cliente:
@@ -4302,8 +4315,8 @@ btnGuardarPendiente.addEventListener(
                             empresaActiva,
                         nombreArchivo:
                             item.archivo.name,
-                        pdf:
-                            pdfBase64,
+                        pdfKey:
+                            pdfKey,
                         updatedAt:
                             new Date().toISOString()
                     });
@@ -4397,9 +4410,13 @@ btnGuardarPendiente.addEventListener(
             const pdfBase64 =
                 await convertirArchivoBase64(archivoActual);
 
+            const idNuevo = Date.now();
+            const pdfKey = clavePDFLocal(empresaActiva, idNuevo);
+            await guardarPDFIndexedDB(pdfKey, pdfBase64);
+
             const nuevoAlbaran = {
                 id:
-                    Date.now(),
+                    idNuevo,
                 numero:
                     albaranActual.numero,
                 cliente:
@@ -4412,8 +4429,8 @@ btnGuardarPendiente.addEventListener(
                     empresaActiva,
                 nombreArchivo:
                     archivoActual.name,
-                pdf:
-                    pdfBase64,
+                pdfKey:
+                    pdfKey,
                 updatedAt:
                     new Date().toISOString()
             };
@@ -4590,8 +4607,6 @@ function albaranesFirmadosParaCopia() {
             albaran
             &&
             albaran.estado === "firmado"
-            &&
-            albaran.pdf
     );
 }
 
@@ -4628,7 +4643,9 @@ async function crearCopiaSeguridadLocal() {
                     albaran.numero || "Albarán"
                 );
 
-            const bytes = dataURLAUint8Array(albaran.pdf);
+            const pdf = await obtenerPDFAlbaran(albaran);
+            if (!pdf) continue;
+            const bytes = dataURLAUint8Array(pdf);
 
             zip.file(
                 `${empresa}/${cliente}/${numero}.pdf`,
@@ -4946,35 +4963,116 @@ function obtenerAlbaranes() {
 
 
 
-function guardarAlbaranes(
+const DB_PDFS_NOMBRE = "gestion-albaranes-pdfs";
+const DB_PDFS_VERSION = 1;
+const DB_PDFS_STORE = "pdfs";
 
-    albaranes
-
-) {
-
-
-
-    localStorage.setItem(
-
-        "albaranes",
-
-        JSON.stringify(
-
-            albaranes
-
-        )
-
-    );
-
-
-
-
-    programarSincronizacionDrive();
-
+function abrirDBPDFs() {
+    return new Promise((resolve, reject) => {
+        const solicitud = indexedDB.open(DB_PDFS_NOMBRE, DB_PDFS_VERSION);
+        solicitud.onupgradeneeded = () => {
+            const db = solicitud.result;
+            if (!db.objectStoreNames.contains(DB_PDFS_STORE)) {
+                db.createObjectStore(DB_PDFS_STORE);
+            }
+        };
+        solicitud.onsuccess = () => resolve(solicitud.result);
+        solicitud.onerror = () => reject(solicitud.error || new Error("No se pudo abrir el almacenamiento de PDFs."));
+    });
 }
 
+function clavePDFLocal(empresa, id) {
+    return `${empresa || "empresa"}::${id}`;
+}
 
+async function guardarPDFIndexedDB(clave, pdf) {
+    if (!clave || !pdf) return;
+    const db = await abrirDBPDFs();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_PDFS_STORE, "readwrite");
+        tx.objectStore(DB_PDFS_STORE).put(pdf, clave);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error("No se pudo guardar el PDF."));
+        tx.onabort = () => reject(tx.error || new Error("No se pudo guardar el PDF."));
+    });
+    db.close();
+}
 
+async function leerPDFIndexedDB(clave) {
+    if (!clave) return null;
+    const db = await abrirDBPDFs();
+    const resultado = await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_PDFS_STORE, "readonly");
+        const solicitud = tx.objectStore(DB_PDFS_STORE).get(clave);
+        solicitud.onsuccess = () => resolve(solicitud.result || null);
+        solicitud.onerror = () => reject(solicitud.error || new Error("No se pudo leer el PDF."));
+    });
+    db.close();
+    return resultado;
+}
+
+async function obtenerPDFAlbaran(albaran) {
+    if (!albaran) return null;
+    if (albaran.pdf) return albaran.pdf;
+    const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+    return leerPDFIndexedDB(clave);
+}
+
+async function guardarPDFsIncluidosEnIndexedDB(albaranes) {
+    for (const albaran of albaranes || []) {
+        if (!albaran || !albaran.pdf) continue;
+        const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+        await guardarPDFIndexedDB(clave, albaran.pdf);
+        albaran.pdfKey = clave;
+    }
+}
+
+async function hidratarAlbaranesConPDF(albaranes) {
+    const resultado = [];
+    for (const albaran of albaranes || []) {
+        if (!albaran) continue;
+        const copia = { ...albaran };
+        const pdf = await obtenerPDFAlbaran(copia);
+        if (pdf) copia.pdf = pdf;
+        resultado.push(copia);
+    }
+    return resultado;
+}
+
+function albaranesSinPDFEmbebido(albaranes) {
+    return (albaranes || []).map(albaran => {
+        if (!albaran) return albaran;
+        const copia = { ...albaran };
+        if (copia.pdf) {
+            copia.pdfKey = copia.pdfKey || clavePDFLocal(copia.empresa, copia.id);
+            delete copia.pdf;
+        }
+        return copia;
+    });
+}
+
+function guardarAlbaranesSoloLocal(albaranes) {
+    localStorage.setItem("albaranes", JSON.stringify(albaranesSinPDFEmbebido(albaranes)));
+}
+
+function guardarAlbaranes(albaranes) {
+    guardarAlbaranesSoloLocal(albaranes);
+    programarSincronizacionDrive();
+}
+
+async function migrarPDFsLocalStorageAIndexedDB() {
+    const albaranes = obtenerAlbaranes();
+    let cambios = false;
+    for (const albaran of albaranes) {
+        if (!albaran || !albaran.pdf) continue;
+        const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+        await guardarPDFIndexedDB(clave, albaran.pdf);
+        albaran.pdfKey = clave;
+        delete albaran.pdf;
+        cambios = true;
+    }
+    if (cambios) guardarAlbaranesSoloLocal(albaranes);
+}
 
 
 /* =========================================================
@@ -5674,9 +5772,9 @@ async function abrirAlbaranPendiente(
 
 
 
-    if (!albaran.pdf) {
+    const pdfAlbaran = await obtenerPDFAlbaran(albaran);
 
-
+    if (!pdfAlbaran) {
 
         alert(
 
@@ -5684,13 +5782,11 @@ async function abrirAlbaranPendiente(
 
         );
 
-
-
         return;
 
-
-
     }
+
+    albaran.pdf = pdfAlbaran;
 
 
 
@@ -6515,9 +6611,9 @@ async function abrirAlbaranFirmado(
 
 
 
-    if (!albaran.pdf) {
+    const pdfAlbaran = await obtenerPDFAlbaran(albaran);
 
-
+    if (!pdfAlbaran) {
 
         alert(
 
@@ -6525,13 +6621,11 @@ async function abrirAlbaranFirmado(
 
         );
 
-
-
         return;
 
-
-
     }
+
+    albaran.pdf = pdfAlbaran;
 
 
 
@@ -8018,9 +8112,10 @@ async function firmarPDFActual() {
 
 
 
-    albaranes[indice].pdf =
-
-        pdfFirmadoBase64;
+    const pdfKeyFirmado = albaranes[indice].pdfKey || clavePDFLocal(albaranes[indice].empresa, albaranes[indice].id);
+    await guardarPDFIndexedDB(pdfKeyFirmado, pdfFirmadoBase64);
+    albaranes[indice].pdfKey = pdfKeyFirmado;
+    delete albaranes[indice].pdf;
 
 
 
@@ -8410,7 +8505,13 @@ window.addEventListener("beforeunload", event => {
     event.returnValue = "";
 });
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
+    try {
+        await migrarPDFsLocalStorageAIndexedDB();
+    } catch (error) {
+        console.error("No se pudieron migrar los PDFs al almacenamiento ampliado:", error);
+    }
+    actualizarContadorPendientes();
     iniciarSincronizacionPeriodicaDispositivos();
     iniciarAccesoPrivado();
 });
