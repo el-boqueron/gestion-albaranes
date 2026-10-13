@@ -591,6 +591,7 @@ async function comprobarCambiosRemotosRapido(forzar = false) {
         omitirSincronizacionAutomatica = true;
         try {
             guardarAlbaranesSoloLocal(combinados);
+            await limpiarPDFsEliminadosIndexedDB(combinados);
         } finally {
             omitirSincronizacionAutomatica = false;
         }
@@ -797,6 +798,7 @@ async function sincronizarConGoogleDrive() {
         omitirSincronizacionAutomatica = true;
         try {
             guardarAlbaranesSoloLocal(combinados);
+            await limpiarPDFsEliminadosIndexedDB(combinados);
         }
         finally {
             omitirSincronizacionAutomatica = false;
@@ -831,6 +833,7 @@ async function sincronizarConGoogleDrive() {
             omitirSincronizacionAutomatica = true;
             try {
                 guardarAlbaranesSoloLocal(finales);
+                await limpiarPDFsEliminadosIndexedDB(finales);
             }
             finally {
                 omitirSincronizacionAutomatica = false;
@@ -4772,7 +4775,7 @@ async function liberarEspacioDriveTrasCopia() {
     }
 
     const confirmado = confirm(
-        `Vas a eliminar ${incluidos.length} albarán(es) firmados de Google Drive y de la aplicación.\n\n`
+        `Vas a eliminar ${incluidos.length} albarán(es) firmados de Google Drive y liberar también su PDF del almacenamiento de los dispositivos.\n\n`
         + "Comprueba antes que el ZIP se ha descargado correctamente.\n\n"
         + "Esta acción no se puede deshacer desde la aplicación.\n\n"
         + "¿Continuar?"
@@ -4802,6 +4805,10 @@ async function liberarEspacioDriveTrasCopia() {
             if (fileId) {
                 await borrarArchivoDrivePorId(fileId);
             }
+
+            const pdfKey =
+                albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+            await eliminarPDFIndexedDB(pdfKey);
         }
 
         const ahora = new Date().toISOString();
@@ -4842,11 +4849,11 @@ async function liberarEspacioDriveTrasCopia() {
         }
 
         estadoCopiaSeguridad.textContent =
-            `Espacio liberado: ${incluidos.length} albarán(es) eliminados de Drive y de la aplicación.`;
+            `Espacio liberado: ${incluidos.length} albarán(es) eliminados de Drive y sus PDFs locales marcados para limpieza en los dispositivos.`;
 
         alert(
-            "Espacio liberado correctamente.\n\n"
-            + "La copia ZIP queda como archivo histórico."
+            "Espacio liberado correctamente en Drive y en este dispositivo.\n\n"
+            + "Los demás dispositivos limpiarán esos PDFs cuando reciban la sincronización. La copia ZIP queda como archivo histórico."
         );
     }
     catch (error) {
@@ -5009,6 +5016,27 @@ async function leerPDFIndexedDB(clave) {
     });
     db.close();
     return resultado;
+}
+
+async function eliminarPDFIndexedDB(clave) {
+    if (!clave) return;
+    const db = await abrirDBPDFs();
+    await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_PDFS_STORE, "readwrite");
+        tx.objectStore(DB_PDFS_STORE).delete(clave);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error("No se pudo eliminar el PDF local."));
+        tx.onabort = () => reject(tx.error || new Error("No se pudo eliminar el PDF local."));
+    });
+    db.close();
+}
+
+async function limpiarPDFsEliminadosIndexedDB(albaranes) {
+    for (const albaran of albaranes || []) {
+        if (!albaran || albaran.estado !== "eliminado") continue;
+        const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+        await eliminarPDFIndexedDB(clave);
+    }
 }
 
 async function obtenerPDFAlbaran(albaran) {

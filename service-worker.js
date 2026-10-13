@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v44-almacenamiento-ampliado";
+const CACHE_NAME = "gestion-albaranes-v48-limpieza-drive-dispositivos";
 
 const ARCHIVOS_APP = [
     "./",
