@@ -40,6 +40,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const WORKER_URL = "https://gestion-albaranes-drive.facturaselboqueron.workers.dev";
 const CLAVE_SESION_APP = "gestionAlbaranesSesion";
 let googleAccessToken = null;
+let googleDriveNecesitaAutorizacion = false;
 
 const btnGoogleDrive = document.getElementById("btnGoogleDrive");
 const estadoGoogleDrive = document.getElementById("estadoGoogleDrive");
@@ -139,16 +140,24 @@ async function validarSesionApp() {
 }
 
 async function obtenerTokenGoogleDesdeWorker() {
-    const respuesta = await peticionWorker("/token");
+    const respuesta = await peticionWorker("/token", { cache: "no-store" });
     const datos = await respuesta.json().catch(() => ({}));
+
     if (respuesta.status === 401 && datos.authenticated === false) {
         borrarTokenSesionApp();
         mostrarLogin();
         throw new Error("La sesión de la aplicación no es válida.");
     }
+
     if (!respuesta.ok || !datos.access_token) {
-        throw new Error(datos.error || "No se pudo obtener acceso a Google Drive.");
+        googleAccessToken = null;
+        googleDriveNecesitaAutorizacion = datos.connected === false;
+        const error = new Error(datos.error || "No se pudo obtener acceso a Google Drive.");
+        error.necesitaAutorizacionGoogle = googleDriveNecesitaAutorizacion;
+        throw error;
     }
+
+    googleDriveNecesitaAutorizacion = false;
     googleAccessToken = datos.access_token;
     return googleAccessToken;
 }
@@ -172,11 +181,17 @@ async function prepararGoogleDriveAutomatico() {
         iniciarSincronizacionPeriodicaDispositivos();
     } catch (error) {
         console.error("Error obteniendo acceso a Google Drive:", error);
-        estadoGoogleDrive.textContent = "Google Drive: no disponible";
-        btnGoogleDrive.textContent = "☁️ Reintentar Google Drive";
 
-        // Aunque Google Drive falle temporalmente, el estado entre dispositivos
-        // puede seguir sincronizándose mediante el Worker.
+        if (error?.necesitaAutorizacionGoogle || googleDriveNecesitaAutorizacion) {
+            estadoGoogleDrive.textContent = "Google Drive: necesita autorización";
+            btnGoogleDrive.textContent = "☁️ Autorizar Google Drive";
+        } else {
+            estadoGoogleDrive.textContent = "Google Drive: conexión pendiente";
+            btnGoogleDrive.textContent = "☁️ Reintentar Google Drive";
+        }
+
+        // El Durable Object sigue sincronizando estados aunque Drive necesite
+        // una nueva autorización o tenga un fallo temporal.
         iniciarSyncRapido();
     }
 }
@@ -230,11 +245,28 @@ btnCerrarSesion.addEventListener("click", () => {
 });
 
 btnGoogleDrive.addEventListener("click", async () => {
+    // Si el Worker ya nos indicó que Google necesita autorización, abrimos
+    // directamente el flujo OAuth. No borramos la sesión ni los datos locales.
+    if (googleDriveNecesitaAutorizacion) {
+        window.open(WORKER_URL + "/oauth/start", "_blank", "noopener,noreferrer");
+        estadoGoogleDrive.textContent = "Autoriza Google Drive y después vuelve a pulsar este botón";
+        btnGoogleDrive.textContent = "☁️ Comprobar Google Drive";
+        googleDriveNecesitaAutorizacion = false;
+        return;
+    }
+
     btnGoogleDrive.disabled = true;
     estadoGoogleDrive.textContent = "Google Drive: conectando...";
     try {
         await prepararGoogleDriveAutomatico();
-        if (googleAccessToken) alert("Google Drive está conectado correctamente.");
+        if (googleAccessToken) {
+            alert("Google Drive está conectado correctamente.");
+        } else if (googleDriveNecesitaAutorizacion) {
+            window.open(WORKER_URL + "/oauth/start", "_blank", "noopener,noreferrer");
+            estadoGoogleDrive.textContent = "Autoriza Google Drive y después vuelve a pulsar este botón";
+            btnGoogleDrive.textContent = "☁️ Comprobar Google Drive";
+            googleDriveNecesitaAutorizacion = false;
+        }
     } finally {
         btnGoogleDrive.disabled = false;
     }
@@ -530,7 +562,7 @@ let omitirSincronizacionAutomatica = false;
 let revisionLocalSincronizacion = 0;
 let intervaloSincronizacionDispositivos = null;
 const CLAVE_SYNC_PENDIENTE = "gestionAlbaranesSyncPendiente";
-const INTERVALO_SYNC_DISPOSITIVOS_MS = 2000;
+const INTERVALO_SYNC_DISPOSITIVOS_MS = 15000;
 let carpetaRaizSincronizacionCache = null;
 let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
@@ -540,7 +572,7 @@ let consultaRemotaEnCurso = false;
    SINCRONIZACIÓN RÁPIDA - DURABLE OBJECT
 ========================================================= */
 
-const INTERVALO_SYNC_RAPIDO_MS = 1000;
+const INTERVALO_SYNC_RAPIDO_MS = 2000;
 let intervaloSyncRapido = null;
 let syncRapidoEnCurso = false;
 let revisionSyncRapido = null;
@@ -8521,13 +8553,13 @@ window.addEventListener("offline", () => {
 
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
-        comprobarCambiosRemotosRapido(true);
+        void comprobarSyncRapido(true);
     }
 });
 
 window.addEventListener("focus", () => {
     if (navigator.onLine && obtenerTokenSesionApp()) {
-        comprobarCambiosRemotosRapido(true);
+        void comprobarSyncRapido(true);
     }
 });
 
@@ -8544,6 +8576,5 @@ window.addEventListener("DOMContentLoaded", async () => {
         console.error("No se pudieron migrar los PDFs al almacenamiento ampliado:", error);
     }
     actualizarContadorPendientes();
-    iniciarSincronizacionPeriodicaDispositivos();
     iniciarAccesoPrivado();
 });
