@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v48-limpieza-drive-dispositivos";
+const CACHE_NAME = "gestion-albaranes-v49-sync-rapido-firma-suave";
 
 const ARCHIVOS_APP = [
     "./",

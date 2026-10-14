@@ -160,6 +160,7 @@ async function prepararGoogleDriveAutomatico() {
         btnGoogleDrive.textContent = "☁️ Google Drive conectado ✓";
         await sincronizarConGoogleDrive();
         iniciarSincronizacionPeriodicaDispositivos();
+        iniciarSyncRapido();
     } catch (error) {
         console.error("Error preparando Google Drive:", error);
         estadoGoogleDrive.textContent = "Google Drive: no disponible";
@@ -521,6 +522,146 @@ let carpetaRaizSincronizacionCache = null;
 let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
 let consultaRemotaEnCurso = false;
+
+/* =========================================================
+   SINCRONIZACIÓN RÁPIDA - DURABLE OBJECT
+========================================================= */
+
+const INTERVALO_SYNC_RAPIDO_MS = 1000;
+let intervaloSyncRapido = null;
+let syncRapidoEnCurso = false;
+let revisionSyncRapido = null;
+let temporizadorEnvioSyncRapido = null;
+let aplicandoSyncRapidoRemoto = false;
+
+function albaranParaSyncRapido(albaran) {
+    if (!albaran || !albaran.id || !albaran.empresa) return null;
+    return {
+        id: String(albaran.id),
+        numero: albaran.numero || String(albaran.id),
+        cliente: albaran.cliente || "",
+        fecha: albaran.fecha || "",
+        empresa: albaran.empresa,
+        estado: albaran.estado || "pendiente",
+        driveFileId: albaran.driveFileId || null,
+        updatedAt: albaran.updatedAt || new Date().toISOString(),
+        fechaFirma: albaran.fechaFirma || null,
+        eliminadoAt: albaran.eliminadoAt || null
+    };
+}
+
+function combinarSyncRapidoConLocal(locales, remotos) {
+    const mapa = new Map((locales || []).map(a => [claveUnicaAlbaran(a), a]));
+    let hayPendienteRemotoSinPDF = false;
+
+    for (const remotoOriginal of remotos || []) {
+        if (!remotoOriginal) continue;
+        const remoto = normalizarAlbaranSincronizado(remotoOriginal);
+        const clave = claveUnicaAlbaran(remoto);
+        const local = mapa.get(clave);
+
+        if (!local) {
+            mapa.set(clave, remoto);
+            if (remoto.estado === "pendiente") hayPendienteRemotoSinPDF = true;
+            continue;
+        }
+
+        if (fechaActualizacionAlbaran(remoto) >= fechaActualizacionAlbaran(local)) {
+            const combinado = {
+                ...local,
+                ...remoto,
+                pdfKey: local.pdfKey || remoto.pdfKey,
+                nombreArchivo: local.nombreArchivo || remoto.nombreArchivo,
+                driveNombre: remoto.driveNombre || local.driveNombre,
+                driveEnlace: remoto.driveEnlace || local.driveEnlace,
+                fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive
+            };
+            mapa.set(clave, combinado);
+            if (remoto.estado === "pendiente" && !local.pdfKey) hayPendienteRemotoSinPDF = true;
+        }
+    }
+
+    return { albaranes: Array.from(mapa.values()), hayPendienteRemotoSinPDF };
+}
+
+async function enviarEstadoSyncRapido(albaranes = obtenerAlbaranes()) {
+    if (!navigator.onLine || !obtenerTokenSesionApp()) return false;
+    const cambios = (albaranes || []).map(albaranParaSyncRapido).filter(Boolean);
+    if (!cambios.length) return true;
+
+    const respuesta = await peticionWorker("/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cambios })
+    });
+    if (!respuesta.ok) throw new Error("No se pudo enviar el estado rápido.");
+    const datos = await respuesta.json();
+    revisionSyncRapido = datos.revision ?? revisionSyncRapido;
+    return true;
+}
+
+function programarEnvioSyncRapido() {
+    if (aplicandoSyncRapidoRemoto || !navigator.onLine || !obtenerTokenSesionApp()) return;
+    clearTimeout(temporizadorEnvioSyncRapido);
+    temporizadorEnvioSyncRapido = setTimeout(() => {
+        enviarEstadoSyncRapido().catch(error => console.error("Sync rápido (envío):", error));
+    }, 80);
+}
+
+async function comprobarSyncRapido(forzar = false) {
+    if (syncRapidoEnCurso || !navigator.onLine || !obtenerTokenSesionApp()) return false;
+    syncRapidoEnCurso = true;
+    try {
+        const respuesta = await peticionWorker("/sync", { cache: "no-store" });
+        if (!respuesta.ok) throw new Error("No se pudo consultar el estado rápido.");
+        const datos = await respuesta.json();
+        const revision = datos.revision ?? 0;
+        if (!forzar && revisionSyncRapido !== null && revision === revisionSyncRapido) return false;
+
+        const resultado = combinarSyncRapidoConLocal(
+            obtenerAlbaranes(),
+            Array.isArray(datos.albaranes) ? datos.albaranes : []
+        );
+
+        aplicandoSyncRapidoRemoto = true;
+        try {
+            guardarAlbaranesSoloLocal(resultado.albaranes);
+            await limpiarPDFsEliminadosIndexedDB(resultado.albaranes);
+        } finally {
+            aplicandoSyncRapidoRemoto = false;
+        }
+
+        revisionSyncRapido = revision;
+        actualizarContadorPendientes();
+        if (!pantallaPendientes.classList.contains("oculto")) cargarListaPendientes();
+
+        /* Un alta remota llega por el Worker casi al instante. El PDF sigue
+           viajando por Drive; forzamos la lectura directa del JSON conocido
+           para obtenerlo sin esperar al sondeo de modifiedTime. */
+        if (resultado.hayPendienteRemotoSinPDF && googleAccessToken) {
+            void sincronizarConGoogleDrive();
+        }
+        return true;
+    } catch (error) {
+        console.error("Sync rápido (lectura):", error);
+        return false;
+    } finally {
+        syncRapidoEnCurso = false;
+    }
+}
+
+function iniciarSyncRapido() {
+    if (intervaloSyncRapido) return;
+    void enviarEstadoSyncRapido()
+        .then(() => comprobarSyncRapido(true))
+        .catch(error => console.error("Inicio sync rápido:", error));
+
+    intervaloSyncRapido = setInterval(() => {
+        if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
+            void comprobarSyncRapido();
+        }
+    }, INTERVALO_SYNC_RAPIDO_MS);
+}
 
 function haySincronizacionLocalPendiente() {
     return localStorage.getItem(CLAVE_SYNC_PENDIENTE) === "1";
@@ -5085,6 +5226,7 @@ function guardarAlbaranesSoloLocal(albaranes) {
 
 function guardarAlbaranes(albaranes) {
     guardarAlbaranesSoloLocal(albaranes);
+    programarEnvioSyncRapido();
     programarSincronizacionDrive();
 }
 
@@ -6963,6 +7105,7 @@ canvasFirma.addEventListener(
 
 
 
+
 canvasFirma.addEventListener(
 
     "pointerup",
@@ -7034,198 +7177,43 @@ canvasFirma.addEventListener(
 
 
 function iniciarFirma(event) {
-
-
-
     event.preventDefault();
-
-
-
-
-
     dibujandoFirma = true;
-
-
-
     firmaTieneTrazos = true;
+    ultimoPuntoFirma = obtenerPuntoCanvas(event);
 
+    try { canvasFirma.setPointerCapture(event.pointerId); } catch (error) {}
 
-
-
-
-    ultimoPuntoFirma =
-
-        obtenerPuntoCanvas(
-
-            event
-
-        );
-
-
-
-
-
-    try {
-
-
-
-        canvasFirma
-
-            .setPointerCapture(
-
-                event.pointerId
-
-            );
-
-
-
-    }
-
-    catch (error) {
-
-    }
-
-
-
-
-
-    const contexto =
-
-        canvasFirma.getContext(
-
-            "2d"
-
-        );
-
-
-
-
-
+    const contexto = canvasFirma.getContext("2d");
+    const radio = Math.max(2.2, contexto.lineWidth / 2);
     contexto.beginPath();
-
-
-
-    contexto.arc(
-
-        ultimoPuntoFirma.x,
-
-        ultimoPuntoFirma.y,
-
-        3,
-
-        0,
-
-        Math.PI * 2
-
-    );
-
-
-
-    contexto.fillStyle =
-
-        "#111111";
-
-
-
+    contexto.arc(ultimoPuntoFirma.x, ultimoPuntoFirma.y, radio, 0, Math.PI * 2);
+    contexto.fillStyle = "#111111";
     contexto.fill();
-
-
-
 }
 
+function dibujarSegmentoFirma(event) {
+    if (!ultimoPuntoFirma) return;
+    const punto = obtenerPuntoCanvas(event);
+    const contexto = canvasFirma.getContext("2d");
+    const medioX = (ultimoPuntoFirma.x + punto.x) / 2;
+    const medioY = (ultimoPuntoFirma.y + punto.y) / 2;
 
-
-
+    contexto.beginPath();
+    contexto.moveTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y);
+    contexto.quadraticCurveTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y, medioX, medioY);
+    contexto.stroke();
+    ultimoPuntoFirma = punto;
+}
 
 function dibujarFirma(event) {
-
-
-
-    if (
-
-        !dibujandoFirma ||
-
-        !ultimoPuntoFirma
-
-    ) {
-
-        return;
-
-    }
-
-
-
-
-
+    if (!dibujandoFirma || !ultimoPuntoFirma) return;
     event.preventDefault();
-
-
-
-
-
-    const punto =
-
-        obtenerPuntoCanvas(
-
-            event
-
-        );
-
-
-
-
-
-    const contexto =
-
-        canvasFirma.getContext(
-
-            "2d"
-
-        );
-
-
-
-
-
-    contexto.beginPath();
-
-
-
-    contexto.moveTo(
-
-        ultimoPuntoFirma.x,
-
-        ultimoPuntoFirma.y
-
-    );
-
-
-
-    contexto.lineTo(
-
-        punto.x,
-
-        punto.y
-
-    );
-
-
-
-    contexto.stroke();
-
-
-
-
-
-    ultimoPuntoFirma = punto;
-
-
-
+    const eventos = typeof event.getCoalescedEvents === "function"
+        ? event.getCoalescedEvents()
+        : [event];
+    for (const evento of eventos) dibujarSegmentoFirma(evento);
 }
-
-
-
-
 
 function terminarFirma(event) {
 
