@@ -158,13 +158,26 @@ async function prepararGoogleDriveAutomatico() {
         await obtenerTokenGoogleDesdeWorker();
         estadoGoogleDrive.textContent = "Google Drive: conectado automáticamente ✓";
         btnGoogleDrive.textContent = "☁️ Google Drive conectado ✓";
-        await sincronizarConGoogleDrive();
-        iniciarSincronizacionPeriodicaDispositivos();
+
+        // El canal rápido no depende de que la sincronización de Drive termine bien.
         iniciarSyncRapido();
+
+        try {
+            await sincronizarConGoogleDrive();
+        } catch (errorDrive) {
+            console.error("Sincronización inicial de Drive pendiente:", errorDrive);
+            estadoGoogleDrive.textContent = "Google Drive: conectado · sincronización pendiente";
+        }
+
+        iniciarSincronizacionPeriodicaDispositivos();
     } catch (error) {
-        console.error("Error preparando Google Drive:", error);
+        console.error("Error obteniendo acceso a Google Drive:", error);
         estadoGoogleDrive.textContent = "Google Drive: no disponible";
         btnGoogleDrive.textContent = "☁️ Reintentar Google Drive";
+
+        // Aunque Google Drive falle temporalmente, el estado entre dispositivos
+        // puede seguir sincronizándose mediante el Worker.
+        iniciarSyncRapido();
     }
 }
 
@@ -652,8 +665,11 @@ async function comprobarSyncRapido(forzar = false) {
 
 function iniciarSyncRapido() {
     if (intervaloSyncRapido) return;
-    void enviarEstadoSyncRapido()
-        .then(() => comprobarSyncRapido(true))
+
+    // Primero leemos el estado central. Así un dispositivo recién abierto no
+    // publica un estado local vacío o antiguo antes de conocer el remoto.
+    void comprobarSyncRapido(true)
+        .then(() => enviarEstadoSyncRapido())
         .catch(error => console.error("Inicio sync rápido:", error));
 
     intervaloSyncRapido = setInterval(() => {
