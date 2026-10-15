@@ -7274,217 +7274,169 @@ canvasFirma.addEventListener(
 
 function iniciarFirma(event) {
     event.preventDefault();
+
     dibujandoFirma = true;
     firmaTieneTrazos = true;
     ultimoPuntoFirma = obtenerPuntoCanvas(event);
 
-    try { canvasFirma.setPointerCapture(event.pointerId); } catch (error) {}
+    try {
+        canvasFirma.setPointerCapture(event.pointerId);
+    }
+    catch (error) {
+    }
 
     const contexto = canvasFirma.getContext("2d");
+    contexto.lineCap = "round";
+    contexto.lineJoin = "round";
+    contexto.strokeStyle = "#111111";
+    contexto.fillStyle = "#111111";
+
     const radio = Math.max(2.2, contexto.lineWidth / 2);
     contexto.beginPath();
-    contexto.arc(ultimoPuntoFirma.x, ultimoPuntoFirma.y, radio, 0, Math.PI * 2);
-    contexto.fillStyle = "#111111";
+    contexto.arc(
+        ultimoPuntoFirma.x,
+        ultimoPuntoFirma.y,
+        radio,
+        0,
+        Math.PI * 2
+    );
     contexto.fill();
 }
 
+
 function dibujarSegmentoFirma(event) {
     if (!ultimoPuntoFirma) return;
-    const punto = obtenerPuntoCanvas(event);
+
+    const puntoFinal = obtenerPuntoCanvas(event);
+    const inicio = ultimoPuntoFirma;
+    const dx = puntoFinal.x - inicio.x;
+    const dy = puntoFinal.y - inicio.y;
+    const distancia = Math.hypot(dx, dy);
+
+    /*
+       El navegador puede entregar pocos eventos cuando el lápiz se mueve
+       deprisa. Interpolamos puntos intermedios para que nunca queden huecos
+       visibles en los trazos largos.
+    */
+    const distanciaMaximaEntrePuntos = 2.25;
+    const pasos = Math.max(
+        1,
+        Math.ceil(distancia / distanciaMaximaEntrePuntos)
+    );
+
     const contexto = canvasFirma.getContext("2d");
-    const medioX = (ultimoPuntoFirma.x + punto.x) / 2;
-    const medioY = (ultimoPuntoFirma.y + punto.y) / 2;
+    contexto.lineCap = "round";
+    contexto.lineJoin = "round";
+    contexto.strokeStyle = "#111111";
 
     contexto.beginPath();
-    contexto.moveTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y);
-    contexto.quadraticCurveTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y, medioX, medioY);
+    contexto.moveTo(inicio.x, inicio.y);
+
+    for (let i = 1; i <= pasos; i++) {
+        const proporcion = i / pasos;
+        const x = inicio.x + dx * proporcion;
+        const y = inicio.y + dy * proporcion;
+        contexto.lineTo(x, y);
+    }
+
     contexto.stroke();
-    ultimoPuntoFirma = punto;
+    ultimoPuntoFirma = puntoFinal;
 }
+
 
 function dibujarFirma(event) {
     if (!dibujandoFirma || !ultimoPuntoFirma) return;
+
     event.preventDefault();
-    const eventos = typeof event.getCoalescedEvents === "function"
-        ? event.getCoalescedEvents()
-        : [event];
-    for (const evento of eventos) dibujarSegmentoFirma(evento);
-}
 
-function terminarFirma(event) {
+    let eventos = [event];
 
+    if (typeof event.getCoalescedEvents === "function") {
+        const eventosAgrupados = event.getCoalescedEvents();
 
-
-    dibujandoFirma = false;
-
-
-
-    ultimoPuntoFirma = null;
-
-
-
-
-
-    if (
-
-        event &&
-
-        event.pointerId !==
-
-            undefined
-
-    ) {
-
-
-
-        try {
-
-
-
-            canvasFirma
-
-                .releasePointerCapture(
-
-                    event.pointerId
-
-                );
-
-
-
+        if (eventosAgrupados && eventosAgrupados.length) {
+            eventos = eventosAgrupados;
         }
-
-        catch (error) {
-
-        }
-
-
-
     }
 
+    for (const evento of eventos) {
+        dibujarSegmentoFirma(evento);
+    }
 
+    /*
+       Algunos navegadores no incluyen el evento principal como último punto
+       de getCoalescedEvents(). Lo añadimos si todavía queda distancia para
+       evitar un pequeño corte al mover el stylus rápidamente.
+    */
+    const puntoPrincipal = obtenerPuntoCanvas(event);
 
+    if (
+        ultimoPuntoFirma &&
+        Math.hypot(
+            puntoPrincipal.x - ultimoPuntoFirma.x,
+            puntoPrincipal.y - ultimoPuntoFirma.y
+        ) > 0.35
+    ) {
+        dibujarSegmentoFirma(event);
+    }
 }
 
 
+function terminarFirma(event) {
+    if (dibujandoFirma && event) {
+        /* Conserva también el último punto del trazo al levantar el lápiz. */
+        try {
+            dibujarSegmentoFirma(event);
+        }
+        catch (error) {
+        }
+    }
+
+    dibujandoFirma = false;
+    ultimoPuntoFirma = null;
+
+    if (
+        event &&
+        event.pointerId !== undefined
+    ) {
+        try {
+            canvasFirma.releasePointerCapture(event.pointerId);
+        }
+        catch (error) {
+        }
+    }
+}
 
 
-
-function obtenerPuntoCanvas(
-
-    event
-
-) {
-
-
-
-    const rectangulo =
-
-        canvasFirma
-
-            .getBoundingClientRect();
-
-
-
-
-
-    const escalaX =
-
-        canvasFirma.width /
-
-        rectangulo.width;
-
-
-
-
-
-    const escalaY =
-
-        canvasFirma.height /
-
-        rectangulo.height;
-
-
-
-
-
+function obtenerPuntoCanvas(event) {
+    const rectangulo = canvasFirma.getBoundingClientRect();
+    const escalaX = canvasFirma.width / rectangulo.width;
+    const escalaY = canvasFirma.height / rectangulo.height;
     const margenTrazo = 8;
 
-
-
     const xCalculada =
-
-        (
-
-            event.clientX -
-
-            rectangulo.left
-
-        )
-
-        *
-
-        escalaX;
-
-
+        (event.clientX - rectangulo.left) * escalaX;
 
     const yCalculada =
-
-        (
-
-            event.clientY -
-
-            rectangulo.top
-
-        )
-
-        *
-
-        escalaY;
-
-
+        (event.clientY - rectangulo.top) * escalaY;
 
     return {
-
-
-
         x: Math.max(
-
             margenTrazo,
-
             Math.min(
-
                 canvasFirma.width - margenTrazo,
-
                 xCalculada
-
             )
-
         ),
-
-
-
         y: Math.max(
-
             margenTrazo,
-
             Math.min(
-
                 canvasFirma.height - margenTrazo,
-
                 yCalculada
-
             )
-
         )
-
-
-
     };
-
-
-
 }
-
 
 
 
