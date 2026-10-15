@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v51-drive-autorizacion-sync-estable";
+const CACHE_NAME = "gestion-albaranes-v52-pdf-sync-id-corregido";
 
 const ARCHIVOS_APP = [
     "./",

@@ -568,6 +568,47 @@ let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
 let consultaRemotaEnCurso = false;
 
+async function descargarPDFDriveAIndexedDB(albaran) {
+    if (!albaran?.driveFileId || albaran.estado === "eliminado") return false;
+
+    const existente = await obtenerPDFAlbaran(albaran);
+    if (existente) return true;
+
+    if (!googleAccessToken) {
+        await obtenerTokenGoogleDesdeWorker();
+    }
+
+    const respuesta = await peticionDrive(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(albaran.driveFileId)}?alt=media`
+    );
+    if (!respuesta.ok) {
+        throw new Error("No se pudo descargar el PDF desde Drive: " + await respuesta.text());
+    }
+
+    const bytes = new Uint8Array(await respuesta.arrayBuffer());
+    const pdfDataURL = uint8ArrayADataURL(bytes, "application/pdf");
+    const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+    await guardarPDFIndexedDB(clave, pdfDataURL);
+    albaran.pdfKey = clave;
+    return true;
+}
+
+async function recuperarPDFsRemotos(albaranes) {
+    let cambios = false;
+    for (const albaran of albaranes || []) {
+        if (!albaran || albaran.estado === "eliminado" || !albaran.driveFileId) continue;
+        try {
+            const antes = albaran.pdfKey || "";
+            const recuperado = await descargarPDFDriveAIndexedDB(albaran);
+            if (recuperado && albaran.pdfKey !== antes) cambios = true;
+        } catch (error) {
+            console.error("PDF remoto todavía no disponible:", albaran.numero, error);
+        }
+    }
+    if (cambios) guardarAlbaranesSoloLocal(albaranes);
+    return cambios;
+}
+
 /* =========================================================
    SINCRONIZACIÓN RÁPIDA - DURABLE OBJECT
 ========================================================= */
@@ -672,6 +713,9 @@ async function comprobarSyncRapido(forzar = false) {
         try {
             guardarAlbaranesSoloLocal(resultado.albaranes);
             await limpiarPDFsEliminadosIndexedDB(resultado.albaranes);
+            /* Si el registro viene de otro dispositivo y ya trae driveFileId,
+               recuperamos el PDF directamente a IndexedDB. */
+            await recuperarPDFsRemotos(resultado.albaranes);
         } finally {
             aplicandoSyncRapidoRemoto = false;
         }
@@ -679,13 +723,6 @@ async function comprobarSyncRapido(forzar = false) {
         revisionSyncRapido = revision;
         actualizarContadorPendientes();
         if (!pantallaPendientes.classList.contains("oculto")) cargarListaPendientes();
-
-        /* Un alta remota llega por el Worker casi al instante. El PDF sigue
-           viajando por Drive; forzamos la lectura directa del JSON conocido
-           para obtenerlo sin esperar al sondeo de modifiedTime. */
-        if (resultado.hayPendienteRemotoSinPDF && googleAccessToken) {
-            void sincronizarConGoogleDrive();
-        }
         return true;
     } catch (error) {
         console.error("Sync rápido (lectura):", error);
@@ -821,6 +858,15 @@ function fechaActualizacionAlbaran(albaran) {
 function normalizarAlbaranSincronizado(albaran) {
     const copia = { ...albaran };
     if (!copia.empresa) copia.empresa = "boqueron";
+
+    /* El Durable Object serializa el id como texto. La aplicación histórica
+       usa ids numéricos en botones, firma y borrado. Lo normalizamos aquí para
+       que un albarán recibido de otro dispositivo se comporte igual que uno local. */
+    const idNumerico = Number(copia.id);
+    if (Number.isFinite(idNumerico) && String(copia.id).trim() !== "") {
+        copia.id = idNumerico;
+    }
+
     if (!copia.updatedAt) {
         const base = Number(copia.id);
         copia.updatedAt = copia.fechaFirma || copia.fechaSubidaDrive || new Date(Number.isFinite(base) ? base : Date.now()).toISOString();
@@ -889,26 +935,28 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
 }
 
 async function subirFirmadosPendientesDrive() {
-    const firmados = obtenerAlbaranes().filter(
+    /* Los pendientes también necesitan su PDF en Drive. El Durable Object
+       transporta el estado rápidamente; Drive transporta el PDF entre equipos. */
+    const candidatos = obtenerAlbaranes().filter(
         albaran =>
             albaran
-            && albaran.estado === "firmado"
+            && (albaran.estado === "pendiente" || albaran.estado === "firmado")
     );
 
-    for (const albaran of firmados) {
+    for (const albaran of candidatos) {
         try {
+            const pdfLocal = await obtenerPDFAlbaran(albaran);
+            if (!pdfLocal) continue; // Es remoto y todavía no ha llegado su PDF.
+
             let necesitaSubida =
                 albaran.pendienteSubidaDrive === true
                 || !albaran.driveFileId
                 || !albaran.fechaSubidaDrive;
 
-            /*
-             * Recuperación de registros antiguos: una copia sincronizada puede
-             * conservar driveFileId/fechaSubidaDrive aunque el PDF real nunca
-             * llegara a quedar guardado en la carpeta esperada de Drive.
-             * Comprobamos el archivo real antes de darlo por subido.
-             */
-            if (!necesitaSubida) {
+            /* En firmados conservamos la comprobación de recuperación que ya
+               existía. En pendientes con id conocido no hacemos búsquedas
+               repetidas: el id se comparte por el Durable Object. */
+            if (!necesitaSubida && albaran.estado === "firmado") {
                 const archivoReal = await localizarPDFDriveAlbaran(albaran);
                 necesitaSubida = !archivoReal;
 
@@ -924,12 +972,12 @@ async function subirFirmadosPendientesDrive() {
 
             if (!necesitaSubida) continue;
 
-            const resultado = await subirPDFDrive(albaran);
+            const resultado = await subirPDFDrive({ ...albaran, pdf: pdfLocal });
             await registrarSubidaDrive(albaran, resultado);
         }
         catch (error) {
             console.error(
-                "PDF firmado pendiente de sincronizar:",
+                "PDF pendiente de sincronizar:",
                 albaran.numero,
                 error
             );
