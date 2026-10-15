@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v53-firma-continua";
+const CACHE_NAME = "gestion-albaranes-v54-recuperacion-pdf-dispositivo";
 
 const ARCHIVOS_APP = [
     "./",

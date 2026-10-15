@@ -568,18 +568,51 @@ let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
 let consultaRemotaEnCurso = false;
 
-async function descargarPDFDriveAIndexedDB(albaran) {
-    if (!albaran?.driveFileId || albaran.estado === "eliminado") return false;
-
-    const existente = await obtenerPDFAlbaran(albaran);
-    if (existente) return true;
+async function resolverDriveFileIdAlbaran(albaran) {
+    if (!albaran || albaran.estado === "eliminado") return null;
+    if (albaran.driveFileId) return albaran.driveFileId;
 
     if (!googleAccessToken) {
         await obtenerTokenGoogleDesdeWorker();
     }
 
+    // Recuperación de seguridad para dispositivos que recibieron el registro
+    // rápido antes de recibir el driveFileId. Buscamos el PDF por su ruta real
+    // en Drive sin crear carpetas nuevas.
+    const nombreEmpresa = albaran.empresa === "boqueron"
+        ? "Carlos Eduardo Rojas Bustos"
+        : (EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa");
+    const cliente = albaran.cliente || "Cliente sin nombre";
+    const nombrePDF = limpiarNombreDrive(albaran.numero || "Albarán") + ".pdf";
+
+    const carpetaRaiz = await buscarCarpetaDrive("Gestión de Albaranes");
+    if (!carpetaRaiz?.id) return null;
+
+    const carpetaEmpresa = await buscarCarpetaDrive(nombreEmpresa, carpetaRaiz.id);
+    if (!carpetaEmpresa?.id) return null;
+
+    const carpetaCliente = await buscarCarpetaDrive(cliente, carpetaEmpresa.id);
+    if (!carpetaCliente?.id) return null;
+
+    const archivo = await buscarPDFDrive(nombrePDF, carpetaCliente.id);
+    if (!archivo?.id) return null;
+
+    albaran.driveFileId = archivo.id;
+    albaran.driveNombre = archivo.name || nombrePDF;
+    return archivo.id;
+}
+
+async function descargarPDFDriveAIndexedDB(albaran) {
+    if (!albaran || albaran.estado === "eliminado") return false;
+
+    const existente = await obtenerPDFAlbaran(albaran);
+    if (existente) return true;
+
+    const driveFileId = await resolverDriveFileIdAlbaran(albaran);
+    if (!driveFileId) return false;
+
     const respuesta = await peticionDrive(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(albaran.driveFileId)}?alt=media`
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`
     );
     if (!respuesta.ok) {
         throw new Error("No se pudo descargar el PDF desde Drive: " + await respuesta.text());
@@ -596,7 +629,7 @@ async function descargarPDFDriveAIndexedDB(albaran) {
 async function recuperarPDFsRemotos(albaranes) {
     let cambios = false;
     for (const albaran of albaranes || []) {
-        if (!albaran || albaran.estado === "eliminado" || !albaran.driveFileId) continue;
+        if (!albaran || albaran.estado === "eliminado") continue;
         try {
             const antes = albaran.pdfKey || "";
             const recuperado = await descargarPDFDriveAIndexedDB(albaran);
@@ -6038,13 +6071,31 @@ async function abrirAlbaranPendiente(
 
 
 
-    const pdfAlbaran = await obtenerPDFAlbaran(albaran);
+    let pdfAlbaran = await obtenerPDFAlbaran(albaran);
+
+    // Si este dispositivo todavía no tiene la copia local, intentamos
+    // recuperarla de Drive en ese mismo momento antes de mostrar un error.
+    if (!pdfAlbaran && navigator.onLine) {
+        try {
+            const recuperado = await descargarPDFDriveAIndexedDB(albaran);
+            if (recuperado) {
+                pdfAlbaran = await obtenerPDFAlbaran(albaran);
+                guardarAlbaranesSoloLocal(obtenerAlbaranes().map(item =>
+                    item.id === albaran.id && item.empresa === albaran.empresa
+                        ? { ...item, driveFileId: albaran.driveFileId, driveNombre: albaran.driveNombre, pdfKey: albaran.pdfKey }
+                        : item
+                ));
+            }
+        } catch (error) {
+            console.error("No se pudo recuperar el PDF al abrir el albarán:", error);
+        }
+    }
 
     if (!pdfAlbaran) {
 
         alert(
 
-            "No se encuentra el PDF de este albarán."
+            "El PDF todavía no está disponible en este dispositivo. Comprueba la conexión y vuelve a intentarlo."
 
         );
 
