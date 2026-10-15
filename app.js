@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO
+   APP.JS COMPLETO - V57 OFFLINE ROBUSTO
 
 ========================================================= */
 
@@ -701,13 +701,104 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     return true;
 }
 
+async function subirPDFPendienteCloudflare(albaran) {
+    if (!albaran || albaran.estado !== "pendiente") return false;
+    const pdf = await obtenerPDFAlbaran(albaran);
+    if (!pdf) return false;
+
+    const bytes = dataURLAUint8Array(pdf);
+    const ruta = "/sync/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id);
+    const respuesta = await peticionWorker(ruta, {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: bytes
+    });
+    if (!respuesta.ok) throw new Error("No se pudo guardar el PDF pendiente en Cloudflare.");
+    return true;
+}
+
+async function descargarPDFPendienteCloudflareAIndexedDB(albaran) {
+    if (!albaran || albaran.estado !== "pendiente") return false;
+    const existente = await obtenerPDFAlbaran(albaran);
+    if (existente) return true;
+    if (!navigator.onLine || !obtenerTokenSesionApp()) return false;
+
+    const ruta = "/sync/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id);
+    const respuesta = await peticionWorker(ruta, { method: "GET", cache: "no-store" });
+    if (!respuesta.ok) return false;
+
+    const bytes = new Uint8Array(await respuesta.arrayBuffer());
+    if (!bytes.length) return false;
+    const pdfDataURL = uint8ArrayADataURL(bytes, "application/pdf");
+    const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+    await guardarPDFIndexedDB(clave, pdfDataURL);
+    albaran.pdfKey = clave;
+    return true;
+}
+
+async function borrarPDFPendienteCloudflare(albaran) {
+    if (!albaran || !albaran.id || !albaran.empresa || !navigator.onLine || !obtenerTokenSesionApp()) return false;
+    const ruta = "/sync/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id);
+    const respuesta = await peticionWorker(ruta, { method: "DELETE" });
+    return respuesta.ok;
+}
+
+let temporizadorPDFsPendientesCloudflare = null;
+let sincronizandoPDFsPendientesCloudflare = false;
+
+function programarPDFsPendientesCloudflare() {
+    if (!navigator.onLine || !obtenerTokenSesionApp()) return;
+    clearTimeout(temporizadorPDFsPendientesCloudflare);
+    temporizadorPDFsPendientesCloudflare = setTimeout(() => {
+        sincronizarPDFsPendientesCloudflare().catch(error =>
+            console.error("PDFs pendientes Cloudflare:", error)
+        );
+    }, 120);
+}
+
+async function sincronizarPDFsPendientesCloudflare() {
+    if (sincronizandoPDFsPendientesCloudflare || !navigator.onLine || !obtenerTokenSesionApp()) return false;
+    sincronizandoPDFsPendientesCloudflare = true;
+    try {
+        const albaranes = obtenerAlbaranes();
+        let cambiosLocales = false;
+        for (const albaran of albaranes) {
+            if (!albaran || albaran.estado !== "pendiente") continue;
+            const pdfLocal = await obtenerPDFAlbaran(albaran);
+            try {
+                if (pdfLocal) {
+                    if (albaran.pdfCloudflareUpdatedAt !== albaran.updatedAt) {
+                        await subirPDFPendienteCloudflare(albaran);
+                        albaran.pdfCloudflareUpdatedAt = albaran.updatedAt;
+                        cambiosLocales = true;
+                    }
+                } else {
+                    const recuperado = await descargarPDFPendienteCloudflareAIndexedDB(albaran);
+                    if (recuperado) cambiosLocales = true;
+                }
+            } catch (error) {
+                console.error("PDF pendiente Cloudflare:", albaran.numero, error);
+            }
+        }
+        if (cambiosLocales) guardarAlbaranesSoloLocal(albaranes);
+        return true;
+    } finally {
+        sincronizandoPDFsPendientesCloudflare = false;
+    }
+}
+
 async function recuperarPDFsRemotos(albaranes) {
     let cambios = false;
     for (const albaran of albaranes || []) {
         if (!albaran || albaran.estado === "eliminado") continue;
         try {
             const antes = albaran.pdfKey || "";
-            const recuperado = await descargarPDFDriveAIndexedDB(albaran);
+            const recuperado = albaran.estado === "pendiente"
+                ? await descargarPDFPendienteCloudflareAIndexedDB(albaran)
+                : await descargarPDFDriveAIndexedDB(albaran);
             if (recuperado && albaran.pdfKey !== antes) cambios = true;
         } catch (error) {
             console.error("PDF remoto todavía no disponible:", albaran.numero, error);
@@ -1050,12 +1141,10 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
 }
 
 async function subirFirmadosPendientesDrive() {
-    /* Los pendientes también necesitan su PDF en Drive. El Durable Object
-       transporta el estado rápidamente; Drive transporta el PDF entre equipos. */
+    /* Los PDFs pendientes viajan por Cloudflare. A Google Drive solo se suben
+       los PDFs ya firmados para su archivo definitivo. */
     const candidatos = obtenerAlbaranes().filter(
-        albaran =>
-            albaran
-            && (albaran.estado === "pendiente" || albaran.estado === "firmado")
+        albaran => albaran && albaran.estado === "firmado"
     );
 
     for (const albaran of candidatos) {
@@ -1261,9 +1350,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 110,
+            x: 120,
 
-            y: 10,
+            y: 20,
 
             ancho: 170
 
@@ -1283,9 +1372,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 110,
+            x: 120,
 
-            y: 10,
+            y: 20,
 
             ancho: 170
 
@@ -5438,6 +5527,7 @@ function guardarAlbaranesSoloLocal(albaranes) {
 function guardarAlbaranes(albaranes) {
     guardarAlbaranesSoloLocal(albaranes);
     programarEnvioSyncRapido();
+    programarPDFsPendientesCloudflare();
     programarSincronizacionDrive();
 }
 
@@ -6067,6 +6157,11 @@ function borrarAlbaranPendiente(id) {
     */
     const ahora = new Date().toISOString();
 
+    // Si era pendiente, limpiamos también su copia temporal de Cloudflare.
+    void borrarPDFPendienteCloudflare(albaran).catch(error =>
+        console.error("No se pudo limpiar el PDF pendiente de Cloudflare:", error)
+    );
+
     albaranes[indice] = {
         id: albaran.id,
         numero: albaran.numero,
@@ -6155,21 +6250,20 @@ async function abrirAlbaranPendiente(
 
     let pdfAlbaran = await obtenerPDFAlbaran(albaran);
 
-    // Si este dispositivo todavía no tiene la copia local, intentamos
-    // recuperarla de Drive en ese mismo momento antes de mostrar un error.
+    // Los albaranes pendientes recuperan su PDF desde Cloudflare, no desde Drive.
     if (!pdfAlbaran && navigator.onLine) {
         try {
-            const recuperado = await descargarPDFDriveAIndexedDB(albaran);
+            const recuperado = await descargarPDFPendienteCloudflareAIndexedDB(albaran);
             if (recuperado) {
                 pdfAlbaran = await obtenerPDFAlbaran(albaran);
                 guardarAlbaranesSoloLocal(obtenerAlbaranes().map(item =>
                     item.id === albaran.id && item.empresa === albaran.empresa
-                        ? { ...item, driveFileId: albaran.driveFileId, driveNombre: albaran.driveNombre, pdfKey: albaran.pdfKey }
+                        ? { ...item, pdfKey: albaran.pdfKey }
                         : item
                 ));
             }
         } catch (error) {
-            console.error("No se pudo recuperar el PDF al abrir el albarán:", error);
+            console.error("No se pudo recuperar el PDF pendiente desde Cloudflare:", error);
         }
     }
 
@@ -7818,6 +7912,11 @@ btnConfirmarFirma.addEventListener(
 
             const albaranParaDrive = { ...albaranAbierto };
             albaranParaDrive.pendienteSubidaDrive = true;
+
+            // Ya firmado: deja de ser un PDF pendiente en Cloudflare.
+            void borrarPDFPendienteCloudflare(albaranParaDrive).catch(error =>
+                console.error("No se pudo limpiar el PDF pendiente de Cloudflare:", error)
+            );
 
             cerrarPantallaFirma();
             iframePDF.src = "";

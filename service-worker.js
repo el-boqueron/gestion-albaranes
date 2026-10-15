@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v55-recuperacion-pdf-reforzada-dispositivo";
+const CACHE_NAME = "gestion-albaranes-v57-offline-robusto";
 
 const ARCHIVOS_APP = [
     "./",
@@ -10,69 +10,125 @@ const ARCHIVOS_APP = [
     "./icon-512.png"
 ];
 
+// Dependencias que app.js necesita incluso antes de poder arrancar.
+// Las precargamos mientras hay conexión para que la PWA pueda abrir
+// posteriormente sin cobertura.
+const DEPENDENCIAS_EXTERNAS = [
+    "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm",
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs",
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs",
+    "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/+esm"
+];
+
 self.addEventListener("install", event => {
-    event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then(cache => cache.addAll(ARCHIVOS_APP))
-    );
+    event.waitUntil((async () => {
+        const cache = await caches.open(CACHE_NAME);
+
+        // El núcleo local sí es obligatorio para considerar instalada esta versión.
+        await cache.addAll(ARCHIVOS_APP);
+
+        // Las librerías externas se intentan precargar una a una. Un fallo temporal
+        // de un CDN no impide actualizar la PWA; además el fetch normal las volverá
+        // a guardar en caché cuando estén disponibles.
+        await Promise.allSettled(
+            DEPENDENCIAS_EXTERNAS.map(async url => {
+                const respuesta = await fetch(url, { cache: "reload" });
+                if (!respuesta || (!respuesta.ok && respuesta.type !== "opaque")) {
+                    throw new Error("No se pudo precargar " + url);
+                }
+                await cache.put(url, respuesta.clone());
+            })
+        );
+    })());
 
     self.skipWaiting();
 });
 
 self.addEventListener("activate", event => {
-    event.waitUntil(
-        caches.keys().then(nombres => {
-            return Promise.all(
-                nombres.map(nombre => {
-                    if (nombre !== CACHE_NAME) {
-                        return caches.delete(nombre);
-                    }
-                })
-            );
-        })
-    );
-
-    self.clients.claim();
+    event.waitUntil((async () => {
+        const nombres = await caches.keys();
+        await Promise.all(
+            nombres.map(nombre => {
+                if (nombre !== CACHE_NAME) return caches.delete(nombre);
+            })
+        );
+        await self.clients.claim();
+    })());
 });
 
 self.addEventListener("fetch", event => {
-    if (event.request.method !== "GET") {
+    if (event.request.method !== "GET") return;
+
+    const url = new URL(event.request.url);
+    const esNavegacion = event.request.mode === "navigate";
+    const esArchivoApp = url.origin === self.location.origin;
+    const esDependencia = DEPENDENCIAS_EXTERNAS.includes(url.href);
+
+    // Para arrancar sin cobertura, navegación y archivos propios usan primero
+    // la copia local. En segundo plano intentamos refrescarlos desde la red.
+    if (esNavegacion || esArchivoApp) {
+        event.respondWith((async () => {
+            const cache = await caches.open(CACHE_NAME);
+            const clave = esNavegacion ? "./index.html" : event.request;
+            const guardado = await cache.match(clave);
+
+            const actualizar = fetch(event.request)
+                .then(async respuesta => {
+                    if (respuesta && respuesta.ok) {
+                        await cache.put(event.request, respuesta.clone());
+                    }
+                    return respuesta;
+                })
+                .catch(() => null);
+
+            if (guardado) {
+                event.waitUntil(actualizar);
+                return guardado;
+            }
+
+            const respuestaRed = await actualizar;
+            if (respuestaRed) return respuestaRed;
+
+            if (esNavegacion) {
+                const inicio = await cache.match("./index.html");
+                if (inicio) return inicio;
+            }
+
+            return new Response("Sin conexión", { status: 503 });
+        })());
         return;
     }
 
-    const url = new URL(event.request.url);
+    // Las librerías PDF/ZIP deben poder cargarse desde caché sin Internet.
+    if (esDependencia) {
+        event.respondWith((async () => {
+            const cache = await caches.open(CACHE_NAME);
+            const guardado = await cache.match(event.request) || await cache.match(url.href);
+            if (guardado) return guardado;
 
+            const respuesta = await fetch(event.request);
+            if (respuesta && (respuesta.ok || respuesta.type === "opaque")) {
+                await cache.put(url.href, respuesta.clone());
+            }
+            return respuesta;
+        })());
+        return;
+    }
+
+    // Resto de GET: red primero y caché como respaldo. Las llamadas a Worker/Drive
+    // no son necesarias para trabajar localmente sin cobertura.
     event.respondWith(
         fetch(event.request)
-            .then(respuestaRed => {
-                if (
-                    respuestaRed &&
-                    (
-                        respuestaRed.status === 200 ||
-                        respuestaRed.type === "opaque"
-                    )
-                ) {
-                    const copia = respuestaRed.clone();
-
-                    caches.open(CACHE_NAME)
-                        .then(cache => {
-                            cache.put(event.request, copia);
-                        });
+            .then(async respuesta => {
+                if (respuesta && (respuesta.ok || respuesta.type === "opaque")) {
+                    const cache = await caches.open(CACHE_NAME);
+                    await cache.put(event.request, respuesta.clone());
                 }
-
-                return respuestaRed;
+                return respuesta;
             })
-            .catch(() => {
-                return caches.match(event.request)
-                    .then(respuestaCache => {
-                        if (respuestaCache) {
-                            return respuestaCache;
-                        }
-
-                        if (event.request.mode === "navigate") {
-                            return caches.match("./index.html");
-                        }
-                    });
+            .catch(async () => {
+                const cache = await caches.open(CACHE_NAME);
+                return (await cache.match(event.request)) || new Response("Sin conexión", { status: 503 });
             })
     );
 });
