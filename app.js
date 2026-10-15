@@ -568,33 +568,90 @@ let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
 let consultaRemotaEnCurso = false;
 
-async function resolverDriveFileIdAlbaran(albaran) {
+async function buscarPDFDriveGlobalPorAlbaran(albaran) {
+    const nombrePDF = limpiarNombreDrive(albaran.numero || "Albarán") + ".pdf";
+    const empresaEsperada = albaran.empresa === "boqueron"
+        ? "Carlos Eduardo Rojas Bustos"
+        : (EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa");
+
+    const q = [
+        `name = '${escaparConsultaDrive(nombrePDF)}'`,
+        "mimeType = 'application/pdf'",
+        "trashed = false"
+    ].join(" and ");
+
+    const url =
+        "https://www.googleapis.com/drive/v3/files?q=" +
+        encodeURIComponent(q) +
+        "&fields=files(id,name,parents,modifiedTime)&orderBy=modifiedTime%20desc&pageSize=100";
+
+    const respuesta = await peticionDrive(url);
+    if (!respuesta.ok) return null;
+
+    const datos = await respuesta.json();
+    const candidatos = datos.files || [];
+    if (!candidatos.length) return null;
+    if (candidatos.length === 1) return candidatos[0];
+
+    // Si existe el mismo número en ambos autónomos, comprobamos la carpeta
+    // de empresa para no recuperar el PDF equivocado.
+    for (const archivo of candidatos) {
+        const carpetaClienteId = archivo.parents?.[0];
+        if (!carpetaClienteId) continue;
+
+        const respuestaCliente = await peticionDrive(
+            `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(carpetaClienteId)}?fields=id,name,parents`
+        );
+        if (!respuestaCliente.ok) continue;
+        const carpetaCliente = await respuestaCliente.json();
+        const carpetaEmpresaId = carpetaCliente.parents?.[0];
+        if (!carpetaEmpresaId) continue;
+
+        const respuestaEmpresa = await peticionDrive(
+            `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(carpetaEmpresaId)}?fields=id,name`
+        );
+        if (!respuestaEmpresa.ok) continue;
+        const carpetaEmpresa = await respuestaEmpresa.json();
+
+        if (carpetaEmpresa.name === empresaEsperada) return archivo;
+    }
+
+    return null;
+}
+
+async function resolverDriveFileIdAlbaran(albaran, forzarBusqueda = false) {
     if (!albaran || albaran.estado === "eliminado") return null;
-    if (albaran.driveFileId) return albaran.driveFileId;
+    if (albaran.driveFileId && !forzarBusqueda) return albaran.driveFileId;
 
     if (!googleAccessToken) {
         await obtenerTokenGoogleDesdeWorker();
     }
 
-    // Recuperación de seguridad para dispositivos que recibieron el registro
-    // rápido antes de recibir el driveFileId. Buscamos el PDF por su ruta real
-    // en Drive sin crear carpetas nuevas.
     const nombreEmpresa = albaran.empresa === "boqueron"
         ? "Carlos Eduardo Rojas Bustos"
         : (EMPRESAS[albaran.empresa]?.nombre || albaran.empresa || "Empresa");
     const cliente = albaran.cliente || "Cliente sin nombre";
     const nombrePDF = limpiarNombreDrive(albaran.numero || "Albarán") + ".pdf";
 
+    // Primero intentamos la ruta normal empresa/cliente/número.
+    let archivo = null;
     const carpetaRaiz = await buscarCarpetaDrive("Gestión de Albaranes");
-    if (!carpetaRaiz?.id) return null;
+    if (carpetaRaiz?.id) {
+        const carpetaEmpresa = await buscarCarpetaDrive(nombreEmpresa, carpetaRaiz.id);
+        if (carpetaEmpresa?.id) {
+            const carpetaCliente = await buscarCarpetaDrive(cliente, carpetaEmpresa.id);
+            if (carpetaCliente?.id) {
+                archivo = await buscarPDFDrive(nombrePDF, carpetaCliente.id);
+            }
+        }
+    }
 
-    const carpetaEmpresa = await buscarCarpetaDrive(nombreEmpresa, carpetaRaiz.id);
-    if (!carpetaEmpresa?.id) return null;
-
-    const carpetaCliente = await buscarCarpetaDrive(cliente, carpetaEmpresa.id);
-    if (!carpetaCliente?.id) return null;
-
-    const archivo = await buscarPDFDrive(nombrePDF, carpetaCliente.id);
+    // Si el cliente cambió de nombre, el registro llegó antes que el PDF o la
+    // ruta no coincide exactamente, buscamos el número en todo Drive y
+    // verificamos la carpeta del autónomo.
+    if (!archivo?.id) {
+        archivo = await buscarPDFDriveGlobalPorAlbaran(albaran);
+    }
     if (!archivo?.id) return null;
 
     albaran.driveFileId = archivo.id;
@@ -608,21 +665,39 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     const existente = await obtenerPDFAlbaran(albaran);
     if (existente) return true;
 
-    const driveFileId = await resolverDriveFileIdAlbaran(albaran);
+    let driveFileId = await resolverDriveFileIdAlbaran(albaran);
     if (!driveFileId) return false;
 
-    const respuesta = await peticionDrive(
-        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`
+    let respuesta = await peticionDrive(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
+        { cache: "no-store" }
     );
+
+    // Un driveFileId antiguo o todavía no visible no debe bloquear el albarán:
+    // volvemos a localizar el PDF real por número y autónomo.
     if (!respuesta.ok) {
-        throw new Error("No se pudo descargar el PDF desde Drive: " + await respuesta.text());
+        const idAnterior = driveFileId;
+        albaran.driveFileId = null;
+        driveFileId = await resolverDriveFileIdAlbaran(albaran, true);
+        if (!driveFileId) {
+            albaran.driveFileId = idAnterior;
+            return false;
+        }
+        respuesta = await peticionDrive(
+            `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
+            { cache: "no-store" }
+        );
+        if (!respuesta.ok) return false;
     }
 
     const bytes = new Uint8Array(await respuesta.arrayBuffer());
+    if (!bytes.length) return false;
+
     const pdfDataURL = uint8ArrayADataURL(bytes, "application/pdf");
     const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
     await guardarPDFIndexedDB(clave, pdfDataURL);
     albaran.pdfKey = clave;
+    albaran.driveFileId = driveFileId;
     return true;
 }
 
@@ -683,6 +758,13 @@ function combinarSyncRapidoConLocal(locales, remotos) {
             mapa.set(clave, remoto);
             if (remoto.estado === "pendiente") hayPendienteRemotoSinPDF = true;
             continue;
+        }
+
+        // El identificador físico de Drive es un dato de transporte: si el otro
+        // dispositivo lo conoce y este no, lo conservamos aunque su updatedAt
+        // sea anterior. Esto no modifica estado, firma ni borrado.
+        if (!local.driveFileId && remoto.driveFileId && local.estado !== "eliminado") {
+            local.driveFileId = remoto.driveFileId;
         }
 
         if (fechaActualizacionAlbaran(remoto) >= fechaActualizacionAlbaran(local)) {
@@ -1179,9 +1261,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 110,
+            x: 75,
 
-            y: 10,
+            y: 35,
 
             ancho: 170
 
@@ -1201,9 +1283,9 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 110,
+            x: 75,
 
-            y: 10,
+            y: 35,
 
             ancho: 170
 
