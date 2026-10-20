@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V57 OFFLINE ROBUSTO
+   APP.JS COMPLETO - V59 DRIVE SOLO FIRMADOS + SUBIDA INMEDIATA
 
 ========================================================= */
 
@@ -452,6 +452,12 @@ async function buscarPDFDrive(nombre, parentId) {
 }
 
 async function subirPDFDrive(albaran) {
+    // BLINDAJE: Google Drive solo puede recibir PDFs cuyo estado sea firmado.
+    // Aunque otra rutina llame a esta función por error, un pendiente nunca se sube.
+    if (!albaran || albaran.estado !== "firmado") {
+        throw new Error("Bloqueada subida a Drive: el albarán no está firmado.");
+    }
+
     const pdfDisponible = await obtenerPDFAlbaran(albaran);
     if (!pdfDisponible) throw new Error("No se encuentra el PDF del albarán.");
     albaran = { ...albaran, pdf: pdfDisponible };
@@ -1192,122 +1198,53 @@ async function subirFirmadosPendientesDrive() {
 
 
 async function sincronizarConGoogleDrive() {
+    /*
+     * V59: Drive deja de ser el canal de sincronización de albaranes/PDFs.
+     * Los estados y pendientes se sincronizan por Cloudflare Durable Object.
+     * Drive se usa EXCLUSIVAMENTE para archivar PDFs ya firmados.
+     */
     if (!obtenerTokenSesionApp() || !navigator.onLine) return false;
 
     if (sincronizacionEnCurso) {
         clearTimeout(temporizadorSincronizacion);
-        temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 1200);
+        temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 500);
         return false;
     }
 
     sincronizacionEnCurso = true;
-    const revisionAlEmpezar = revisionLocalSincronizacion;
 
     try {
         if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
 
-        await subirFirmadosPendientesDrive();
-
-        const carpetaRaiz = await obtenerOCrearCarpetaDrive("Gestión de Albaranes");
-        carpetaRaizSincronizacionCache = carpetaRaiz;
-        let archivo = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        if (archivo?.id) archivoSincronizacionCache = archivo;
-        let remoto = archivo ? await descargarDatosSincronizacionDrive(archivo) : null;
-
-        /*
-         * Antes de mezclar, volvemos a consultar el archivo de Drive. Esto
-         * reduce la ventana en la que otro móvil/ordenador puede haber escrito
-         * un alta, una firma o un borrado después de nuestra primera lectura.
-         */
-        const archivoMasReciente = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        if (archivoMasReciente?.id) {
-            archivo = archivoMasReciente;
-            remoto = await descargarDatosSincronizacionDrive(archivoMasReciente);
-        }
-
-        /*
-         * Se vuelve a leer el estado local justo antes de combinar para no
-         * perder un albarán que se haya guardado mientras la sincronización
-         * estaba esperando respuestas de red.
-         */
-        const combinados = combinarAlbaranes(
-            obtenerAlbaranes(),
-            Array.isArray(remoto?.albaranes) ? remoto.albaranes : []
+        // Primero publica/recoge estados por Cloudflare y después recupera
+        // inmediatamente cualquier firmado que siga pendiente de Drive.
+        await enviarEstadoSyncRapido().catch(error =>
+            console.error("Sync rápido antes de Drive:", error)
+        );
+        await comprobarSyncRapido(true).catch(error =>
+            console.error("Sync rápido al recuperar Drive:", error)
         );
 
-        await guardarPDFsIncluidosEnIndexedDB(combinados);
-        omitirSincronizacionAutomatica = true;
-        try {
-            guardarAlbaranesSoloLocal(combinados);
-            await limpiarPDFsEliminadosIndexedDB(combinados);
-        }
-        finally {
-            omitirSincronizacionAutomatica = false;
-        }
+        await subirFirmadosPendientesDrive();
 
-        const combinadosConPDF = await hidratarAlbaranesConPDF(combinados);
-        const resultadoSubidaSync = await subirDatosSincronizacionDrive(carpetaRaiz, archivo, {
-            version: 1,
-            actualizado: new Date().toISOString(),
-            albaranes: combinadosConPDF
-        });
-        if (resultadoSubidaSync?.id) {
-            archivoSincronizacionCache = resultadoSubidaSync;
-            modifiedTimeSincronizacionConocido = resultadoSubidaSync.modifiedTime || modifiedTimeSincronizacionConocido;
-        }
-
-        /*
-         * Verificación rápida: releemos el JSON después de escribir y volvemos
-         * a mezclarlo con el estado local. Así un borrado/firma/alta recibido
-         * durante la sincronización se refleja sin esperar al siguiente ciclo.
-         */
-        const archivoVerificacion = await buscarArchivoSincronizacionDrive(carpetaRaiz);
-        if (archivoVerificacion?.id) {
-            archivoSincronizacionCache = archivoVerificacion;
-            modifiedTimeSincronizacionConocido = archivoVerificacion.modifiedTime || modifiedTimeSincronizacionConocido;
-            const remotoVerificacion = await descargarDatosSincronizacionDrive(archivoVerificacion);
-            const finales = combinarAlbaranes(
-                obtenerAlbaranes(),
-                Array.isArray(remotoVerificacion?.albaranes) ? remotoVerificacion.albaranes : []
-            );
-            await guardarPDFsIncluidosEnIndexedDB(finales);
-            omitirSincronizacionAutomatica = true;
-            try {
-                guardarAlbaranesSoloLocal(finales);
-                await limpiarPDFsEliminadosIndexedDB(finales);
-            }
-            finally {
-                omitirSincronizacionAutomatica = false;
-            }
-        }
-
-        if (revisionLocalSincronizacion === revisionAlEmpezar) {
-            confirmarSincronizacionLocal();
-        } else {
-            clearTimeout(temporizadorSincronizacion);
-            temporizadorSincronizacion = setTimeout(() => sincronizarConGoogleDrive(), 500);
-        }
-
+        confirmarSincronizacionLocal();
         actualizarContadorPendientes();
-        if (!pantallaPendientes.classList.contains("oculto")) mostrarPendientes();
-        if (!pantallaClientes.classList.contains("oculto")) btnVolverAlbaranesCliente.click();
+        if (!pantallaPendientes.classList.contains("oculto")) cargarListaPendientes();
 
-        estadoGoogleDrive.textContent = haySincronizacionLocalPendiente()
-            ? "Pendientes: sincronizando entre dispositivos..."
-            : "Google Drive: conectado y sincronizado ✓";
+        estadoGoogleDrive.textContent =
+            "Google Drive: firmados sincronizados ✓";
 
         return true;
     }
     catch (error) {
-        console.error("Error sincronizando con Google Drive:", error);
-        estadoGoogleDrive.textContent = haySincronizacionLocalPendiente()
-            ? "⚠️ Hay cambios pendientes de sincronizar"
-            : "Google Drive: conectado · sincronización pendiente";
+        console.error("Error sincronizando firmados con Google Drive:", error);
+        estadoGoogleDrive.textContent =
+            "Google Drive: hay firmados pendientes de subir";
 
         clearTimeout(temporizadorSincronizacion);
         temporizadorSincronizacion = setTimeout(() => {
             if (navigator.onLine) sincronizarConGoogleDrive();
-        }, 5000);
+        }, 3000);
 
         return false;
     }
@@ -8154,9 +8091,9 @@ async function firmarPDFActual() {
 
         {
 
-            x: 75,
+            x: 130,
 
-            y: 82,
+            y: 20,
 
             ancho: 170
 
@@ -8430,6 +8367,10 @@ async function firmarPDFActual() {
         new Date().toISOString();
 
 
+
+    // Se guarda ANTES de depender de Internet. Si la app se cierra o no hay
+    // cobertura, al volver a abrir/conectar se recuperará automáticamente.
+    albaranes[indice].pendienteSubidaDrive = true;
 
     albaranes[indice].updatedAt =
 
@@ -8748,22 +8689,25 @@ function escaparHTML(valor) {
 window.addEventListener("online", () => {
 
     estadoGoogleDrive.textContent =
-        "Cobertura recuperada · conectando con Google Drive...";
+        "Cobertura recuperada · subiendo firmados pendientes...";
 
-    setTimeout(
-        async () => {
-            try {
-                await prepararGoogleDriveAutomatico();
-            }
-            catch (error) {
-                console.error(
-                    "No se pudo recuperar la conexión con Google Drive:",
-                    error
-                );
-            }
-        },
-        1000
-    );
+    // Sin espera artificial: en cuanto el navegador confirma cobertura,
+    // reanudamos Cloudflare y la subida de firmados a Drive.
+    void (async () => {
+        try {
+            await prepararGoogleDriveAutomatico();
+            await sincronizarPDFsPendientesCloudflare().catch(error =>
+                console.error("PDFs pendientes Cloudflare al recuperar cobertura:", error)
+            );
+            await sincronizarConGoogleDrive();
+        }
+        catch (error) {
+            console.error(
+                "No se pudo recuperar la conexión con Google Drive:",
+                error
+            );
+        }
+    })();
 
 });
 
@@ -8786,12 +8730,14 @@ window.addEventListener("offline", () => {
 document.addEventListener("visibilitychange", () => {
     if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
         void comprobarSyncRapido(true);
+        void sincronizarConGoogleDrive();
     }
 });
 
 window.addEventListener("focus", () => {
     if (navigator.onLine && obtenerTokenSesionApp()) {
         void comprobarSyncRapido(true);
+        void sincronizarConGoogleDrive();
     }
 });
 
