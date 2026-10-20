@@ -8734,6 +8734,34 @@ function escaparHTML(valor) {
 
 ========================================================= */
 
+
+/* =========================================================
+   V64 - BLOQUEO VERTICAL EN PWA ANDROID
+========================================================= */
+async function bloquearOrientacionVertical() {
+    try {
+        if (
+            window.matchMedia("(display-mode: standalone)").matches
+            &&
+            screen.orientation
+            &&
+            typeof screen.orientation.lock === "function"
+        ) {
+            await screen.orientation.lock("portrait");
+        }
+    }
+    catch (error) {
+        // Android/Chrome puede rechazar temporalmente el bloqueo si todavía
+        // no considera la PWA en un estado apto. Se vuelve a intentar al
+        // recuperar foco, visibilidad y pageshow.
+        console.warn("Android no permitió bloquear orientación todavía:", error);
+    }
+}
+
+window.addEventListener("pageshow", () => {
+    void bloquearOrientacionVertical();
+});
+
 window.addEventListener("online", () => {
 
     estadoGoogleDrive.textContent =
@@ -8776,6 +8804,9 @@ window.addEventListener("offline", () => {
 
 
 document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+        void bloquearOrientacionVertical();
+    }
     if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
         void comprobarSyncRapido(true);
         void sincronizarConGoogleDrive();
@@ -8783,6 +8814,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 window.addEventListener("focus", () => {
+    void bloquearOrientacionVertical();
     if (navigator.onLine && obtenerTokenSesionApp()) {
         void comprobarSyncRapido(true);
         void sincronizarConGoogleDrive();
@@ -8796,6 +8828,7 @@ window.addEventListener("beforeunload", event => {
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
+    void bloquearOrientacionVertical();
     try {
         await migrarPDFsLocalStorageAIndexedDB();
     } catch (error) {
