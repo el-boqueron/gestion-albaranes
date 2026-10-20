@@ -8375,8 +8375,27 @@ async function firmarPDFActual() {
 
 
     const pdfKeyFirmado = albaranes[indice].pdfKey || clavePDFLocal(albaranes[indice].empresa, albaranes[indice].id);
+
+    // V63: primero persistimos el PDF firmado y lo leemos de vuelta.
+    // El albarán NO puede pasar a estado "firmado" si el PDF guardado
+    // no coincide exactamente con el PDF firmado que acabamos de generar.
     await guardarPDFIndexedDB(pdfKeyFirmado, pdfFirmadoBase64);
+
+    const pdfFirmadoVerificado = await leerPDFIndexedDB(pdfKeyFirmado);
+    if (
+        !pdfFirmadoVerificado
+        ||
+        pdfFirmadoVerificado !== pdfFirmadoBase64
+    ) {
+        throw new Error(
+            "No se pudo verificar el PDF firmado en el almacenamiento del dispositivo. " +
+            "El albarán seguirá pendiente y no se subirá a Drive."
+        );
+    }
+
     albaranes[indice].pdfKey = pdfKeyFirmado;
+    albaranes[indice].pdfFirmadoVerificado = true;
+    albaranes[indice].pdfFirmadoBytes = dataURLAUint8Array(pdfFirmadoVerificado).byteLength;
     delete albaranes[indice].pdf;
 
 

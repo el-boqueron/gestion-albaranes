@@ -1499,6 +1499,21 @@
 
 
 
+    // V63: mantener la PWA en orientación vertical cuando el navegador lo permite.
+    async function bloquearOrientacionVertical() {
+        try {
+            if (screen.orientation && typeof screen.orientation.lock === "function") {
+                await screen.orientation.lock("portrait");
+            }
+        } catch (error) {
+            // Algunos navegadores solo permiten el bloqueo en modo PWA/pantalla completa.
+            console.info("Bloqueo de orientación gestionado por el manifest o el sistema.");
+        }
+    }
+
+    bloquearOrientacionVertical();
+    window.addEventListener("pageshow", bloquearOrientacionVertical);
+
     if ("serviceWorker" in navigator) {
 
 
