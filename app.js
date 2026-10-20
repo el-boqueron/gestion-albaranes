@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V59 DRIVE SOLO FIRMADOS + SUBIDA INMEDIATA
+   APP.JS COMPLETO - V61 DEFINITIVA · DRIVE SOLO FIRMADOS
 
 ========================================================= */
 
@@ -43,7 +43,6 @@ let googleAccessToken = null;
 let googleDriveNecesitaAutorizacion = false;
 
 const btnGoogleDrive = document.getElementById("btnGoogleDrive");
-const btnReconstruirDrive = document.getElementById("btnReconstruirDrive");
 const estadoGoogleDrive = document.getElementById("estadoGoogleDrive");
 const pantallaLogin = document.getElementById("pantallaLogin");
 const formLogin = document.getElementById("formLogin");
@@ -452,7 +451,35 @@ async function buscarPDFDrive(nombre, parentId) {
     return datos.files?.[0] || null;
 }
 
+const subidasPDFDriveEnCurso = new Map();
+
 async function subirPDFDrive(albaran) {
+    // Evita que dos reintentos simultáneos de ESTE dispositivo hagan a la vez
+    // el ciclo buscar->crear para el mismo albarán. El segundo espera y vuelve
+    // a buscar, por lo que actualizará el archivo que haya creado el primero.
+    if (!albaran || albaran.estado !== "firmado") {
+        throw new Error("Bloqueada subida a Drive: el albarán no está firmado.");
+    }
+
+    const empresaClave = albaran.empresa || "boqueron";
+    const clienteClave = limpiarNombreDrive(albaran.cliente || "Cliente sin nombre").toLocaleUpperCase("es");
+    const numeroClave = limpiarNombreDrive(albaran.numero || "Albarán").toLocaleUpperCase("es");
+    const clave = `${empresaClave}::${clienteClave}::${numeroClave}`;
+
+    const anterior = subidasPDFDriveEnCurso.get(clave) || Promise.resolve();
+    const operacion = anterior.catch(() => {}).then(() => subirPDFDriveSinBloqueo(albaran));
+    subidasPDFDriveEnCurso.set(clave, operacion);
+
+    try {
+        return await operacion;
+    } finally {
+        if (subidasPDFDriveEnCurso.get(clave) === operacion) {
+            subidasPDFDriveEnCurso.delete(clave);
+        }
+    }
+}
+
+async function subirPDFDriveSinBloqueo(albaran) {
     // BLINDAJE: Google Drive solo puede recibir PDFs cuyo estado sea firmado.
     // Aunque otra rutina llame a esta función por error, un pendiente nunca se sube.
     if (!albaran || albaran.estado !== "firmado") {
@@ -1197,102 +1224,7 @@ async function subirFirmadosPendientesDrive() {
 }
 
 
-// =========================================================
-// RECUPERACIÓN TEMPORAL: RECONSTRUIR DRIVE DESDE ESTE DISPOSITIVO
-// =========================================================
-// Esta función se eliminará cuando termine la recuperación histórica.
-// No usa los ids antiguos de Drive para decidir qué subir: fuerza una pasada
-// completa, pero EXCLUSIVAMENTE sobre albaranes firmados con PDF local.
-async function reconstruirDriveDesdeEsteDispositivo() {
-    if (!navigator.onLine) {
-        alert("Necesitas cobertura para reconstruir Google Drive.");
-        return;
-    }
-
-    const firmados = obtenerAlbaranes().filter(
-        albaran => albaran && albaran.estado === "firmado"
-    );
-
-    if (!firmados.length) {
-        alert("Este dispositivo no tiene albaranes marcados como firmados.");
-        return;
-    }
-
-    const confirmacion = confirm(
-        "RECUPERACIÓN TEMPORAL DE DRIVE\n\n" +
-        "Se volverán a subir TODOS los albaranes firmados que tengan su PDF guardado en este dispositivo.\n\n" +
-        "Los albaranes pendientes o sin firmar NO se subirán.\n\n" +
-        "Firmados encontrados: " + firmados.length + "\n\n" +
-        "¿Quieres iniciar ahora la reconstrucción?"
-    );
-
-    if (!confirmacion) return;
-
-    btnReconstruirDrive.disabled = true;
-    const textoAnterior = btnReconstruirDrive.textContent;
-    let subidos = 0;
-    let sinPDFLocal = 0;
-    let errores = 0;
-
-    try {
-        if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
-
-        for (let i = 0; i < firmados.length; i++) {
-            const albaran = firmados[i];
-            btnReconstruirDrive.textContent =
-                `♻️ Recuperando ${i + 1}/${firmados.length}…`;
-            estadoGoogleDrive.textContent =
-                `Reconstruyendo Drive: ${i + 1}/${firmados.length} · ${albaran.numero || "Albarán"}`;
-
-            try {
-                const pdfLocal = await obtenerPDFAlbaran(albaran);
-                if (!pdfLocal) {
-                    sinPDFLocal++;
-                    continue;
-                }
-
-                // subirPDFDrive contiene además su propio blindaje estado=firmado.
-                const resultado = await subirPDFDrive({ ...albaran, pdf: pdfLocal });
-                await registrarSubidaDrive(albaran, resultado);
-                subidos++;
-            }
-            catch (error) {
-                errores++;
-                console.error("Error reconstruyendo Drive:", albaran.numero, error);
-                await marcarSubidaDrivePendiente(albaran).catch(() => {});
-            }
-        }
-
-        estadoGoogleDrive.textContent = errores
-            ? "Google Drive: reconstrucción terminada con incidencias"
-            : "Google Drive: reconstrucción terminada ✓";
-
-        alert(
-            "RECONSTRUCCIÓN TERMINADA\n\n" +
-            "Subidos correctamente: " + subidos + "\n" +
-            "Firmados sin PDF local: " + sinPDFLocal + "\n" +
-            "Errores de subida: " + errores + "\n\n" +
-            "No se ha subido ningún albarán sin firmar."
-        );
-    }
-    catch (error) {
-        console.error("No se pudo iniciar la reconstrucción de Drive:", error);
-        estadoGoogleDrive.textContent = "Google Drive: reconstrucción interrumpida";
-        alert("No se pudo completar la reconstrucción de Drive: " + error.message);
-    }
-    finally {
-        btnReconstruirDrive.disabled = false;
-        btnReconstruirDrive.textContent = textoAnterior;
-    }
-}
-
-if (btnReconstruirDrive) {
-    btnReconstruirDrive.addEventListener("click", () => {
-        void reconstruirDriveDesdeEsteDispositivo();
-    });
-}
-
-
+// Recuperación histórica finalizada: herramienta temporal eliminada.
 
 async function sincronizarConGoogleDrive() {
     /*

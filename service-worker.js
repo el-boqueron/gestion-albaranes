@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v60-actualizacion-segura-recuperacion";
+const CACHE_NAME = "gestion-albaranes-v61-definitiva-drive-seguro";
 
 const ARCHIVOS_APP = [
     "./",
@@ -64,7 +64,7 @@ self.addEventListener("fetch", event => {
     const esArchivoApp = url.origin === self.location.origin;
     const esDependencia = DEPENDENCIAS_EXTERNAS.includes(url.href);
 
-    // V60: con cobertura, los archivos propios se piden primero a la red.
+    // V61: con cobertura, los archivos propios se piden primero a la red.
     // Así una publicación nueva llega al móvil inmediatamente. Si no hay
     // cobertura, se conserva el arranque offline usando la caché local.
     if (esNavegacion || esArchivoApp) {
