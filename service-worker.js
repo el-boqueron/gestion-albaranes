@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v59-recuperacion-drive-temporal";
+const CACHE_NAME = "gestion-albaranes-v60-actualizacion-segura-recuperacion";
 
 const ARCHIVOS_APP = [
     "./",
@@ -64,37 +64,26 @@ self.addEventListener("fetch", event => {
     const esArchivoApp = url.origin === self.location.origin;
     const esDependencia = DEPENDENCIAS_EXTERNAS.includes(url.href);
 
-    // Para arrancar sin cobertura, navegación y archivos propios usan primero
-    // la copia local. En segundo plano intentamos refrescarlos desde la red.
+    // V60: con cobertura, los archivos propios se piden primero a la red.
+    // Así una publicación nueva llega al móvil inmediatamente. Si no hay
+    // cobertura, se conserva el arranque offline usando la caché local.
     if (esNavegacion || esArchivoApp) {
         event.respondWith((async () => {
             const cache = await caches.open(CACHE_NAME);
-            const clave = esNavegacion ? "./index.html" : event.request;
-            const guardado = await cache.match(clave);
 
-            const actualizar = fetch(event.request)
-                .then(async respuesta => {
-                    if (respuesta && respuesta.ok) {
-                        await cache.put(event.request, respuesta.clone());
-                    }
-                    return respuesta;
-                })
-                .catch(() => null);
-
-            if (guardado) {
-                event.waitUntil(actualizar);
-                return guardado;
+            try {
+                const respuesta = await fetch(event.request, { cache: "no-store" });
+                if (respuesta && respuesta.ok) {
+                    const clave = esNavegacion ? "./index.html" : event.request;
+                    await cache.put(clave, respuesta.clone());
+                }
+                return respuesta;
+            } catch (error) {
+                const clave = esNavegacion ? "./index.html" : event.request;
+                const guardado = await cache.match(clave) || await cache.match(event.request);
+                if (guardado) return guardado;
+                return new Response("Sin conexión", { status: 503 });
             }
-
-            const respuestaRed = await actualizar;
-            if (respuestaRed) return respuestaRed;
-
-            if (esNavegacion) {
-                const inicio = await cache.match("./index.html");
-                if (inicio) return inicio;
-            }
-
-            return new Response("Sin conexión", { status: 503 });
         })());
         return;
     }
@@ -115,8 +104,7 @@ self.addEventListener("fetch", event => {
         return;
     }
 
-    // Resto de GET: red primero y caché como respaldo. Las llamadas a Worker/Drive
-    // no son necesarias para trabajar localmente sin cobertura.
+    // Resto de GET: red primero y caché como respaldo.
     event.respondWith(
         fetch(event.request)
             .then(async respuesta => {

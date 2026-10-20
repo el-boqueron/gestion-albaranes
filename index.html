@@ -1514,7 +1514,7 @@
 
                 navigator.serviceWorker
 
-                    .register("./service-worker.js")
+                    .register("./service-worker.js", { updateViaCache: "none" })
 
                     .then(registro => {
 
@@ -1527,6 +1527,9 @@
                             registro.scope
 
                         );
+
+                        // Fuerza la comprobación de una versión nueva sin tocar IndexedDB.
+                        registro.update().catch(() => {});
 
 
 

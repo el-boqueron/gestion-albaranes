@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Actualizar Gestión de Albaranes</title></head>
+<body style="font-family:Arial,sans-serif;padding:24px;max-width:680px;margin:auto">
+<h1>Actualizando Gestión de Albaranes…</h1><p id="estado">No cierres esta pantalla.</p>
+<script>
+(async()=>{
+ const estado=document.getElementById('estado');
+ try {
+   if ('serviceWorker' in navigator) {
+     const regs=await navigator.serviceWorker.getRegistrations();
+     await Promise.all(regs.map(r=>r.unregister()));
+   }
+   // Solo borra cachés de archivos de la aplicación. NO toca IndexedDB ni localStorage.
+   const nombres=await caches.keys();
+   await Promise.all(nombres.filter(n=>n.startsWith('gestion-albaranes-')).map(n=>caches.delete(n)));
+   estado.textContent='Actualización preparada. Abriendo la aplicación…';
+   location.replace('./index.html?v=60');
+ } catch(e) {
+   estado.textContent='No se pudo completar la actualización: '+(e.message||e);
+ }
+})();
+</script>
+</body></html>
