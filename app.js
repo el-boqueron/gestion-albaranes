@@ -43,6 +43,7 @@ let googleAccessToken = null;
 let googleDriveNecesitaAutorizacion = false;
 
 const btnGoogleDrive = document.getElementById("btnGoogleDrive");
+const btnReconstruirDrive = document.getElementById("btnReconstruirDrive");
 const estadoGoogleDrive = document.getElementById("estadoGoogleDrive");
 const pantallaLogin = document.getElementById("pantallaLogin");
 const formLogin = document.getElementById("formLogin");
@@ -1193,6 +1194,102 @@ async function subirFirmadosPendientesDrive() {
             );
         }
     }
+}
+
+
+// =========================================================
+// RECUPERACIÓN TEMPORAL: RECONSTRUIR DRIVE DESDE ESTE DISPOSITIVO
+// =========================================================
+// Esta función se eliminará cuando termine la recuperación histórica.
+// No usa los ids antiguos de Drive para decidir qué subir: fuerza una pasada
+// completa, pero EXCLUSIVAMENTE sobre albaranes firmados con PDF local.
+async function reconstruirDriveDesdeEsteDispositivo() {
+    if (!navigator.onLine) {
+        alert("Necesitas cobertura para reconstruir Google Drive.");
+        return;
+    }
+
+    const firmados = obtenerAlbaranes().filter(
+        albaran => albaran && albaran.estado === "firmado"
+    );
+
+    if (!firmados.length) {
+        alert("Este dispositivo no tiene albaranes marcados como firmados.");
+        return;
+    }
+
+    const confirmacion = confirm(
+        "RECUPERACIÓN TEMPORAL DE DRIVE\n\n" +
+        "Se volverán a subir TODOS los albaranes firmados que tengan su PDF guardado en este dispositivo.\n\n" +
+        "Los albaranes pendientes o sin firmar NO se subirán.\n\n" +
+        "Firmados encontrados: " + firmados.length + "\n\n" +
+        "¿Quieres iniciar ahora la reconstrucción?"
+    );
+
+    if (!confirmacion) return;
+
+    btnReconstruirDrive.disabled = true;
+    const textoAnterior = btnReconstruirDrive.textContent;
+    let subidos = 0;
+    let sinPDFLocal = 0;
+    let errores = 0;
+
+    try {
+        if (!googleAccessToken) await obtenerTokenGoogleDesdeWorker();
+
+        for (let i = 0; i < firmados.length; i++) {
+            const albaran = firmados[i];
+            btnReconstruirDrive.textContent =
+                `♻️ Recuperando ${i + 1}/${firmados.length}…`;
+            estadoGoogleDrive.textContent =
+                `Reconstruyendo Drive: ${i + 1}/${firmados.length} · ${albaran.numero || "Albarán"}`;
+
+            try {
+                const pdfLocal = await obtenerPDFAlbaran(albaran);
+                if (!pdfLocal) {
+                    sinPDFLocal++;
+                    continue;
+                }
+
+                // subirPDFDrive contiene además su propio blindaje estado=firmado.
+                const resultado = await subirPDFDrive({ ...albaran, pdf: pdfLocal });
+                await registrarSubidaDrive(albaran, resultado);
+                subidos++;
+            }
+            catch (error) {
+                errores++;
+                console.error("Error reconstruyendo Drive:", albaran.numero, error);
+                await marcarSubidaDrivePendiente(albaran).catch(() => {});
+            }
+        }
+
+        estadoGoogleDrive.textContent = errores
+            ? "Google Drive: reconstrucción terminada con incidencias"
+            : "Google Drive: reconstrucción terminada ✓";
+
+        alert(
+            "RECONSTRUCCIÓN TERMINADA\n\n" +
+            "Subidos correctamente: " + subidos + "\n" +
+            "Firmados sin PDF local: " + sinPDFLocal + "\n" +
+            "Errores de subida: " + errores + "\n\n" +
+            "No se ha subido ningún albarán sin firmar."
+        );
+    }
+    catch (error) {
+        console.error("No se pudo iniciar la reconstrucción de Drive:", error);
+        estadoGoogleDrive.textContent = "Google Drive: reconstrucción interrumpida";
+        alert("No se pudo completar la reconstrucción de Drive: " + error.message);
+    }
+    finally {
+        btnReconstruirDrive.disabled = false;
+        btnReconstruirDrive.textContent = textoAnterior;
+    }
+}
+
+if (btnReconstruirDrive) {
+    btnReconstruirDrive.addEventListener("click", () => {
+        void reconstruirDriveDesdeEsteDispositivo();
+    });
 }
 
 
