@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v67-firmado-inmutable-hash";
+const CACHE_NAME = "gestion-albaranes-v68-flujo-unico";
 
 const ARCHIVOS_APP = [
     "./",

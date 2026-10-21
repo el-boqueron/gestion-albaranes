@@ -489,20 +489,21 @@ async function subirPDFDriveSinBloqueo(albaran) {
     // V65: si este dispositivo sabe expresamente que su copia local todavía
     // es la original (recibió el estado firmado desde el otro móvil), jamás
     // puede usarla para crear o sustituir el archivo definitivo de Drive.
-    if (albaran.pdfFirmadoVerificado === false) {
-        throw new Error("Bloqueada subida a Drive: la copia local firmada todavía no está verificada.");
+    if (albaran.pdfFirmadoVerificado !== true) {
+        throw new Error("Bloqueada subida a Drive: la copia firmada no está verificada.");
+    }
+    if (!albaran.pdfFirmadoHash) {
+        throw new Error("Bloqueada subida a Drive: falta la huella del PDF firmado.");
+    }
+    if (albaran.pendienteSubidaDrive !== true) {
+        return { subido: false, yaConfirmado: true, id: albaran.driveFileId || null };
     }
 
-    const pdfDisponible = await obtenerPDFAlbaran(albaran);
-    if (!pdfDisponible) throw new Error("No se encuentra el PDF del albarán.");
-
-    // V67: si conocemos la huella de la firma, Drive solo puede recibir EXACTAMENTE
-    // esos bytes. Un PDF original o una copia distinta queda bloqueado.
-    if (albaran.pdfFirmadoHash) {
-        const hashLocal = await sha256HexDataURL(pdfDisponible);
-        if (hashLocal !== albaran.pdfFirmadoHash) {
-            throw new Error("Bloqueada subida a Drive: el PDF local no coincide con la huella del firmado.");
-        }
+    const pdfDisponible = await obtenerPDFFirmadoInmutable(albaran);
+    if (!pdfDisponible) throw new Error("No se encuentra la copia firmada inmutable.");
+    const hashLocal = await sha256HexDataURL(pdfDisponible);
+    if (hashLocal !== albaran.pdfFirmadoHash) {
+        throw new Error("Bloqueada subida a Drive: la copia inmutable no coincide con la huella firmada.");
     }
     albaran = { ...albaran, pdf: pdfDisponible };
 
@@ -712,15 +713,17 @@ async function resolverDriveFileIdAlbaran(albaran, forzarBusqueda = false) {
 async function descargarPDFDriveAIndexedDB(albaran) {
     if (!albaran || albaran.estado === "eliminado") return false;
 
-    const existente = await obtenerPDFAlbaran(albaran);
+    const existente = albaran.estado === "firmado"
+        ? await obtenerPDFFirmadoInmutable(albaran)
+        : await obtenerPDFAlbaran(albaran);
 
-    // V65: para un firmado recibido desde otro dispositivo no basta con que
-    // exista "algún" PDF local: normalmente ese archivo es el original que
-    // estaba en Pendientes. Solo damos por buena una copia que este dispositivo
-    // ya haya verificado como firmada. En caso contrario descargamos la copia
-    // definitiva de Drive y sustituimos el original local.
-    if (existente && albaran.estado === "firmado" && albaran.pdfFirmadoVerificado === true) {
-        return true;
+    if (existente && albaran.estado === "firmado" && albaran.pdfFirmadoHash) {
+        const hashExistente = await sha256HexDataURL(existente);
+        if (hashExistente === albaran.pdfFirmadoHash) {
+            albaran.pdfFirmadoVerificado = true;
+            albaran.pdfKey = clavePDFFirmadoLocal(albaran.empresa, albaran.id);
+            return true;
+        }
     }
     if (existente && albaran.estado !== "firmado") return true;
 
@@ -775,7 +778,6 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     if (albaran.estado === "firmado") {
         albaran.pdfFirmadoVerificado = true;
         albaran.pdfFirmadoBytes = bytes.byteLength;
-        albaran.fechaSubidaDrive = albaran.fechaSubidaDrive || new Date().toISOString();
         albaran.pendienteSubidaDrive = false;
     }
     return true;
@@ -1264,36 +1266,22 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
 }
 
 async function subirFirmadosPendientesDrive() {
-    /* V65: Drive solo recibe firmados que este dispositivo posee de forma
-       verificada. Una subida confirmada no se vuelve a PATCHear una y otra vez. */
-    const candidatos = obtenerAlbaranes().filter(
-        albaran => albaran && albaran.estado === "firmado"
+    // V68: una sola cola. Solo sube una copia firmada inmutable, verificada,
+    // con huella y marcada explícitamente como pendiente. Tras confirmar, se acabó.
+    const candidatos = obtenerAlbaranes().filter(albaran =>
+        albaran &&
+        albaran.estado === "firmado" &&
+        albaran.pendienteSubidaDrive === true &&
+        albaran.pdfFirmadoVerificado === true &&
+        !!albaran.pdfFirmadoHash
     );
 
     for (const albaran of candidatos) {
         try {
-            // false significa: este móvil recibió el estado firmado, pero aún
-            // conserva el PDF original pendiente. Primero debe recuperar Drive.
-            if (albaran.pdfFirmadoVerificado === false) {
-                await descargarPDFDriveAIndexedDB(albaran);
-                continue;
-            }
-
-            const necesitaSubida =
-                albaran.pendienteSubidaDrive === true
-                || !albaran.driveFileId
-                || !albaran.fechaSubidaDrive;
-
-            if (!necesitaSubida) continue;
-
-            const pdfLocal = await obtenerPDFAlbaran(albaran);
-            if (!pdfLocal) continue;
-
-            const resultado = await subirPDFDrive({ ...albaran, pdf: pdfLocal });
+            const resultado = await subirPDFDrive(albaran);
             await registrarSubidaDrive(albaran, resultado);
-        }
-        catch (error) {
-            console.error("PDF pendiente de sincronizar:", albaran.numero, error);
+        } catch (error) {
+            console.error("PDF firmado pendiente de Drive:", albaran.numero, error);
         }
     }
 }
@@ -1664,6 +1652,8 @@ const btnGuardarPendiente =
 const btnFirmar =
 
     document.getElementById("btnFirmar");
+
+const btnUsarCopiaFirmada = document.getElementById("btnUsarCopiaFirmada");
 
 
 const btnAbrirEn =
@@ -5543,6 +5533,13 @@ async function obtenerPDFAlbaran(albaran) {
     return leerPDFIndexedDB(clave);
 }
 
+// V68: Drive nunca lee desde la ruta genérica. Solo desde la copia firmada inmutable.
+async function obtenerPDFFirmadoInmutable(albaran) {
+    if (!albaran || albaran.estado !== "firmado") return null;
+    const clave = clavePDFFirmadoLocal(albaran.empresa, albaran.id);
+    return leerPDFIndexedDB(clave);
+}
+
 async function guardarPDFsIncluidosEnIndexedDB(albaranes) {
     for (const albaran of albaranes || []) {
         if (!albaran || !albaran.pdf) continue;
@@ -6401,10 +6398,7 @@ async function abrirAlbaranPendiente(
 
 
     btnAbrirEn.style.display = "";
-
-
-
-
+    if (btnUsarCopiaFirmada) btnUsarCopiaFirmada.style.display = "none";
 
     mostrarVisor();
 
@@ -7233,13 +7227,10 @@ async function abrirAlbaranFirmado(
 
 
 
-    accionesVisor.style.display =
-
-        "none";
-
-
-
-
+    accionesVisor.style.display = "";
+    btnFirmar.style.display = "none";
+    btnAbrirEn.style.display = "";
+    if (btnUsarCopiaFirmada) btnUsarCopiaFirmada.style.display = "";
 
     mostrarVisor();
 
@@ -7289,6 +7280,49 @@ btnAbrirEn.addEventListener(
     }
 );
 
+
+// V68 - Recuperación controlada de históricos.
+// Se usa SOLO en el dispositivo donde el usuario ve la firma correcta.
+// Convierte esa copia visible en la autoridad inmutable, publica su huella y
+// permite una única sustitución en Drive. Los demás dispositivos descargarán
+// exactamente esa huella y no volverán a subirla.
+if (btnUsarCopiaFirmada) {
+    btnUsarCopiaFirmada.addEventListener("click", async () => {
+        if (!albaranAbierto || albaranAbierto.estado !== "firmado" || !albaranAbierto.pdf) return;
+        if (!confirm("¿Confirmas que ESTA copia es la que contiene la firma correcta? Solo se usará para reparar este albarán en Drive y en los demás dispositivos.")) return;
+        try {
+            btnUsarCopiaFirmada.disabled = true;
+            const pdf = albaranAbierto.pdf;
+            const claveFirmada = clavePDFFirmadoLocal(albaranAbierto.empresa, albaranAbierto.id);
+            await guardarPDFIndexedDB(claveFirmada, pdf);
+            const verificado = await leerPDFIndexedDB(claveFirmada);
+            if (!verificado || verificado !== pdf) throw new Error("No se pudo verificar la copia firmada.");
+            const hash = await sha256HexDataURL(verificado);
+            const albaranes = obtenerAlbaranes();
+            const i = albaranes.findIndex(a => a.id === albaranAbierto.id && a.empresa === albaranAbierto.empresa);
+            if (i < 0) throw new Error("No se encontró el albarán.");
+            albaranes[i].pdfKey = claveFirmada;
+            albaranes[i].pdfFirmadoHash = hash;
+            albaranes[i].pdfFirmadoVerificado = true;
+            albaranes[i].pdfFirmadoOrigen = "reparacion-local-confirmada";
+            albaranes[i].pendienteSubidaDrive = true;
+            albaranes[i].fechaSubidaDrive = null;
+            albaranes[i].updatedAt = new Date().toISOString();
+            guardarAlbaranes(albaranes);
+            albaranAbierto = { ...albaranes[i], pdf: verificado };
+            await enviarEstadoSyncRapido().catch(() => {});
+            const resultado = await subirPDFDrive(albaranes[i]);
+            await registrarSubidaDrive(albaranes[i], resultado);
+            await enviarEstadoSyncRapido().catch(() => {});
+            alert("Copia firmada fijada como definitiva. Drive queda corregido y los demás dispositivos la recibirán una sola vez.");
+        } catch (error) {
+            console.error("Reparación de firmado:", error);
+            alert("No se pudo completar la reparación. La copia local no se ha borrado.");
+        } finally {
+            btnUsarCopiaFirmada.disabled = false;
+        }
+    });
+}
 
 /* =========================================================
 
