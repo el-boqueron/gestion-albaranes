@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V66 PDF FIRMADO DEFINITIVO ENTRE DISPOSITIVOS
+   APP.JS COMPLETO - V67 PDF FIRMADO INMUTABLE + HASH ENTRE DISPOSITIVOS
 
 ========================================================= */
 
@@ -495,6 +495,15 @@ async function subirPDFDriveSinBloqueo(albaran) {
 
     const pdfDisponible = await obtenerPDFAlbaran(albaran);
     if (!pdfDisponible) throw new Error("No se encuentra el PDF del albarán.");
+
+    // V67: si conocemos la huella de la firma, Drive solo puede recibir EXACTAMENTE
+    // esos bytes. Un PDF original o una copia distinta queda bloqueado.
+    if (albaran.pdfFirmadoHash) {
+        const hashLocal = await sha256HexDataURL(pdfDisponible);
+        if (hashLocal !== albaran.pdfFirmadoHash) {
+            throw new Error("Bloqueada subida a Drive: el PDF local no coincide con la huella del firmado.");
+        }
+    }
     albaran = { ...albaran, pdf: pdfDisponible };
 
     if (!googleAccessToken) {
@@ -744,15 +753,28 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     if (!bytes.length) return false;
 
     const pdfDataURL = uint8ArrayADataURL(bytes, "application/pdf");
-    const clave = albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id);
+
+    // V67: si el dispositivo firmante publicó una huella, una copia de Drive que
+    // no coincida NO se acepta y NO puede sustituir ningún PDF local.
+    if (albaran.estado === "firmado" && albaran.pdfFirmadoHash) {
+        const hashDrive = await sha256HexBytes(bytes);
+        if (hashDrive !== albaran.pdfFirmadoHash) {
+            albaran.pdfFirmadoVerificado = false;
+            albaran.pendienteSubidaDrive = false;
+            console.error("Drive contiene una copia distinta del firmado:", albaran.numero);
+            return false;
+        }
+    }
+
+    const clave = albaran.estado === "firmado"
+        ? clavePDFFirmadoLocal(albaran.empresa, albaran.id)
+        : (albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id));
     await guardarPDFIndexedDB(clave, pdfDataURL);
     albaran.pdfKey = clave;
     albaran.driveFileId = driveFileId;
     if (albaran.estado === "firmado") {
         albaran.pdfFirmadoVerificado = true;
         albaran.pdfFirmadoBytes = bytes.byteLength;
-        // V66: una descarga correcta desde Drive demuestra que allí ya existe
-        // la copia definitiva. Este móvil no debe volver a subir/reemplazarla.
         albaran.fechaSubidaDrive = albaran.fechaSubidaDrive || new Date().toISOString();
         albaran.pendienteSubidaDrive = false;
     }
@@ -903,6 +925,7 @@ function albaranParaSyncRapido(albaran) {
         driveNombre: albaran.driveNombre || null,
         driveEnlace: albaran.driveEnlace || null,
         fechaSubidaDrive: albaran.fechaSubidaDrive || null,
+        pdfFirmadoHash: albaran.pdfFirmadoHash || null,
         updatedAt: albaran.updatedAt || new Date().toISOString(),
         fechaFirma: albaran.fechaFirma || null,
         eliminadoAt: albaran.eliminadoAt || null
@@ -953,7 +976,8 @@ function combinarSyncRapidoConLocal(locales, remotos) {
                 nombreArchivo: local.nombreArchivo || remoto.nombreArchivo,
                 driveNombre: remoto.driveNombre || local.driveNombre,
                 driveEnlace: remoto.driveEnlace || local.driveEnlace,
-                fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive
+                fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive,
+                pdfFirmadoHash: remoto.pdfFirmadoHash || local.pdfFirmadoHash
             };
 
             if (remotoConvierteAFirmado) {
@@ -5450,6 +5474,21 @@ function clavePDFLocal(empresa, id) {
     return `${empresa || "empresa"}::${id}`;
 }
 
+// V67: el PDF firmado vive en una clave distinta del pendiente.
+// Así una recuperación del original pendiente nunca puede sobrescribir la firma.
+function clavePDFFirmadoLocal(empresa, id) {
+    return `${empresa || "empresa"}::${id}::firmado`;
+}
+
+async function sha256HexBytes(bytes) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256HexDataURL(dataURL) {
+    return sha256HexBytes(dataURLAUint8Array(dataURL));
+}
+
 async function guardarPDFIndexedDB(clave, pdf) {
     if (!clave || !pdf) return;
     const db = await abrirDBPDFs();
@@ -8425,7 +8464,7 @@ async function firmarPDFActual() {
 
 
 
-    const pdfKeyFirmado = albaranes[indice].pdfKey || clavePDFLocal(albaranes[indice].empresa, albaranes[indice].id);
+    const pdfKeyFirmado = clavePDFFirmadoLocal(albaranes[indice].empresa, albaranes[indice].id);
 
     // V63: primero persistimos el PDF firmado y lo leemos de vuelta.
     // El albarán NO puede pasar a estado "firmado" si el PDF guardado
@@ -8447,6 +8486,8 @@ async function firmarPDFActual() {
     albaranes[indice].pdfKey = pdfKeyFirmado;
     albaranes[indice].pdfFirmadoVerificado = true;
     albaranes[indice].pdfFirmadoBytes = dataURLAUint8Array(pdfFirmadoVerificado).byteLength;
+    albaranes[indice].pdfFirmadoHash = await sha256HexDataURL(pdfFirmadoVerificado);
+    albaranes[indice].pdfFirmadoOrigen = "local";
     delete albaranes[indice].pdf;
 
 

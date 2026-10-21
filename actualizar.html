@@ -15,7 +15,7 @@
    const nombres=await caches.keys();
    await Promise.all(nombres.filter(n=>n.startsWith('gestion-albaranes-')).map(n=>caches.delete(n)));
    estado.textContent='Actualización preparada. Abriendo la aplicación…';
-   location.replace('./index.html?v=66');
+   location.replace('./index.html?v=67');
  } catch(e) {
    estado.textContent='No se pudo completar la actualización: '+(e.message||e);
  }
