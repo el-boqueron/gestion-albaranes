@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v64-vertical-android";
+const CACHE_NAME = "gestion-albaranes-v65-firmados-protegidos";
 
 const ARCHIVOS_APP = [
     "./",

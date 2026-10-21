@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V61 DEFINITIVA · DRIVE SOLO FIRMADOS
+   APP.JS COMPLETO - V65 PDF FIRMADO PROTEGIDO ENTRE DISPOSITIVOS
 
 ========================================================= */
 
@@ -486,6 +486,13 @@ async function subirPDFDriveSinBloqueo(albaran) {
         throw new Error("Bloqueada subida a Drive: el albarán no está firmado.");
     }
 
+    // V65: si este dispositivo sabe expresamente que su copia local todavía
+    // es la original (recibió el estado firmado desde el otro móvil), jamás
+    // puede usarla para crear o sustituir el archivo definitivo de Drive.
+    if (albaran.pdfFirmadoVerificado === false) {
+        throw new Error("Bloqueada subida a Drive: la copia local firmada todavía no está verificada.");
+    }
+
     const pdfDisponible = await obtenerPDFAlbaran(albaran);
     if (!pdfDisponible) throw new Error("No se encuentra el PDF del albarán.");
     albaran = { ...albaran, pdf: pdfDisponible };
@@ -697,7 +704,16 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     if (!albaran || albaran.estado === "eliminado") return false;
 
     const existente = await obtenerPDFAlbaran(albaran);
-    if (existente) return true;
+
+    // V65: para un firmado recibido desde otro dispositivo no basta con que
+    // exista "algún" PDF local: normalmente ese archivo es el original que
+    // estaba en Pendientes. Solo damos por buena una copia que este dispositivo
+    // ya haya verificado como firmada. En caso contrario descargamos la copia
+    // definitiva de Drive y sustituimos el original local.
+    if (existente && albaran.estado === "firmado" && albaran.pdfFirmadoVerificado === true) {
+        return true;
+    }
+    if (existente && albaran.estado !== "firmado") return true;
 
     let driveFileId = await resolverDriveFileIdAlbaran(albaran);
     if (!driveFileId) return false;
@@ -732,6 +748,10 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     await guardarPDFIndexedDB(clave, pdfDataURL);
     albaran.pdfKey = clave;
     albaran.driveFileId = driveFileId;
+    if (albaran.estado === "firmado") {
+        albaran.pdfFirmadoVerificado = true;
+        albaran.pdfFirmadoBytes = bytes.byteLength;
+    }
     return true;
 }
 
@@ -880,19 +900,32 @@ function combinarSyncRapidoConLocal(locales, remotos) {
         const local = mapa.get(clave);
 
         if (!local) {
+            // Si llega ya firmado, este dispositivo aún NO posee una copia
+            // firmada verificada. La recuperará de Drive cuando esté disponible.
+            if (remoto.estado === "firmado") remoto.pdfFirmadoVerificado = false;
             mapa.set(clave, remoto);
             if (remoto.estado === "pendiente") hayPendienteRemotoSinPDF = true;
             continue;
         }
 
-        // El identificador físico de Drive es un dato de transporte: si el otro
-        // dispositivo lo conoce y este no, lo conservamos aunque su updatedAt
-        // sea anterior. Esto no modifica estado, firma ni borrado.
         if (!local.driveFileId && remoto.driveFileId && local.estado !== "eliminado") {
             local.driveFileId = remoto.driveFileId;
         }
 
-        if (fechaActualizacionAlbaran(remoto) >= fechaActualizacionAlbaran(local)) {
+        // V65: un estado pendiente jamás puede degradar un firmado. Y un firmado
+        // remoto siempre gana a un pendiente local aunque los relojes de los
+        // móviles difieran. Así la firma se propaga en una sola dirección.
+        if (local.estado === "firmado" && remoto.estado === "pendiente") {
+            continue;
+        }
+
+        const remotoConvierteAFirmado =
+            local.estado === "pendiente" && remoto.estado === "firmado";
+        const remotoDebeGanar =
+            remotoConvierteAFirmado
+            || fechaActualizacionAlbaran(remoto) >= fechaActualizacionAlbaran(local);
+
+        if (remotoDebeGanar) {
             const combinado = {
                 ...local,
                 ...remoto,
@@ -902,6 +935,15 @@ function combinarSyncRapidoConLocal(locales, remotos) {
                 driveEnlace: remoto.driveEnlace || local.driveEnlace,
                 fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive
             };
+
+            if (remotoConvierteAFirmado) {
+                // El PDF que ya había en IndexedDB es el original pendiente.
+                // No se puede subir a Drive ni mostrar como copia firmada hasta
+                // reemplazarlo por la copia definitiva del dispositivo firmante.
+                combinado.pdfFirmadoVerificado = false;
+                delete combinado.pdfFirmadoBytes;
+            }
+
             mapa.set(clave, combinado);
             if (remoto.estado === "pendiente" && !local.pdfKey) hayPendienteRemotoSinPDF = true;
         }
@@ -1010,7 +1052,10 @@ function iniciarSincronizacionPeriodicaDispositivos() {
     if (intervaloSincronizacionDispositivos) return;
     intervaloSincronizacionDispositivos = setInterval(() => {
         if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
-            comprobarCambiosRemotosRapido();
+            // V65: la sincronización activa entre dispositivos es únicamente el
+            // Durable Object. El antiguo JSON de Drive no vuelve a aplicarse,
+            // evitando que una copia histórica pueda pisar estados/PDFs actuales.
+            void comprobarSyncRapido();
         }
     }, INTERVALO_SYNC_DISPOSITIVOS_MS);
 }
@@ -1175,50 +1220,36 @@ async function subirDatosSincronizacionDrive(carpetaRaiz, archivoExistente, dato
 }
 
 async function subirFirmadosPendientesDrive() {
-    /* Los PDFs pendientes viajan por Cloudflare. A Google Drive solo se suben
-       los PDFs ya firmados para su archivo definitivo. */
+    /* V65: Drive solo recibe firmados que este dispositivo posee de forma
+       verificada. Una subida confirmada no se vuelve a PATCHear una y otra vez. */
     const candidatos = obtenerAlbaranes().filter(
         albaran => albaran && albaran.estado === "firmado"
     );
 
     for (const albaran of candidatos) {
         try {
-            const pdfLocal = await obtenerPDFAlbaran(albaran);
-            if (!pdfLocal) continue; // Es remoto y todavía no ha llegado su PDF.
+            // false significa: este móvil recibió el estado firmado, pero aún
+            // conserva el PDF original pendiente. Primero debe recuperar Drive.
+            if (albaran.pdfFirmadoVerificado === false) {
+                await descargarPDFDriveAIndexedDB(albaran);
+                continue;
+            }
 
-            let necesitaSubida =
+            const necesitaSubida =
                 albaran.pendienteSubidaDrive === true
                 || !albaran.driveFileId
                 || !albaran.fechaSubidaDrive;
 
-            /* En firmados conservamos la comprobación de recuperación que ya
-               existía. En pendientes con id conocido no hacemos búsquedas
-               repetidas: el id se comparte por el Durable Object. */
-            if (!necesitaSubida && albaran.estado === "firmado") {
-                const archivoReal = await localizarPDFDriveAlbaran(albaran);
-                necesitaSubida = !archivoReal;
-
-                if (archivoReal && archivoReal.id !== albaran.driveFileId) {
-                    await registrarSubidaDrive(albaran, {
-                        subido: true,
-                        id: archivoReal.id,
-                        nombre: archivoReal.name,
-                        enlace: albaran.driveEnlace || ""
-                    });
-                }
-            }
-
             if (!necesitaSubida) continue;
+
+            const pdfLocal = await obtenerPDFAlbaran(albaran);
+            if (!pdfLocal) continue;
 
             const resultado = await subirPDFDrive({ ...albaran, pdf: pdfLocal });
             await registrarSubidaDrive(albaran, resultado);
         }
         catch (error) {
-            console.error(
-                "PDF pendiente de sincronizar:",
-                albaran.numero,
-                error
-            );
+            console.error("PDF pendiente de sincronizar:", albaran.numero, error);
         }
     }
 }
