@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V65 PDF FIRMADO PROTEGIDO ENTRE DISPOSITIVOS
+   APP.JS COMPLETO - V66 PDF FIRMADO DEFINITIVO ENTRE DISPOSITIVOS
 
 ========================================================= */
 
@@ -751,6 +751,10 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     if (albaran.estado === "firmado") {
         albaran.pdfFirmadoVerificado = true;
         albaran.pdfFirmadoBytes = bytes.byteLength;
+        // V66: una descarga correcta desde Drive demuestra que allí ya existe
+        // la copia definitiva. Este móvil no debe volver a subir/reemplazarla.
+        albaran.fechaSubidaDrive = albaran.fechaSubidaDrive || new Date().toISOString();
+        albaran.pendienteSubidaDrive = false;
     }
     return true;
 }
@@ -849,11 +853,24 @@ async function recuperarPDFsRemotos(albaranes) {
     for (const albaran of albaranes || []) {
         if (!albaran || albaran.estado === "eliminado") continue;
         try {
-            const antes = albaran.pdfKey || "";
+            const antes = JSON.stringify([
+                albaran.pdfKey || "",
+                albaran.driveFileId || null,
+                albaran.pdfFirmadoVerificado === true,
+                albaran.fechaSubidaDrive || null,
+                albaran.pendienteSubidaDrive === true
+            ]);
             const recuperado = albaran.estado === "pendiente"
                 ? await descargarPDFPendienteCloudflareAIndexedDB(albaran)
                 : await descargarPDFDriveAIndexedDB(albaran);
-            if (recuperado && albaran.pdfKey !== antes) cambios = true;
+            const despues = JSON.stringify([
+                albaran.pdfKey || "",
+                albaran.driveFileId || null,
+                albaran.pdfFirmadoVerificado === true,
+                albaran.fechaSubidaDrive || null,
+                albaran.pendienteSubidaDrive === true
+            ]);
+            if (recuperado && despues !== antes) cambios = true;
         } catch (error) {
             console.error("PDF remoto todavía no disponible:", albaran.numero, error);
         }
@@ -883,6 +900,9 @@ function albaranParaSyncRapido(albaran) {
         empresa: albaran.empresa,
         estado: albaran.estado || "pendiente",
         driveFileId: albaran.driveFileId || null,
+        driveNombre: albaran.driveNombre || null,
+        driveEnlace: albaran.driveEnlace || null,
+        fechaSubidaDrive: albaran.fechaSubidaDrive || null,
         updatedAt: albaran.updatedAt || new Date().toISOString(),
         fechaFirma: albaran.fechaFirma || null,
         eliminadoAt: albaran.eliminadoAt || null
