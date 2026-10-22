@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V67 PDF FIRMADO INMUTABLE + HASH ENTRE DISPOSITIVOS
+   APP.JS COMPLETO - V70 PDF FIRMADO TEMPORAL CLOUDFLARE + HASH
 
 ========================================================= */
 
@@ -492,6 +492,9 @@ async function subirPDFDriveSinBloqueo(albaran) {
     if (albaran.pdfFirmadoVerificado !== true) {
         throw new Error("Bloqueada subida a Drive: la copia firmada no está verificada.");
     }
+    if (albaran.pdfFirmadoOrigen !== "local") {
+        throw new Error("Bloqueada subida a Drive: este dispositivo no creó esta firma.");
+    }
     if (!albaran.pdfFirmadoHash) {
         throw new Error("Bloqueada subida a Drive: falta la huella del PDF firmado.");
     }
@@ -783,6 +786,59 @@ async function descargarPDFDriveAIndexedDB(albaran) {
     return true;
 }
 
+async function subirPDFFirmadoCloudflare(albaran) {
+    if (!albaran || albaran.estado !== "firmado" || albaran.pdfFirmadoVerificado !== true || !albaran.pdfFirmadoHash) return false;
+    if (!navigator.onLine || !obtenerTokenSesionApp()) return false;
+    const pdf = await obtenerPDFFirmadoInmutable(albaran);
+    if (!pdf) return false;
+    const bytes = dataURLAUint8Array(pdf);
+    const hashLocal = await sha256HexBytes(bytes);
+    if (hashLocal !== albaran.pdfFirmadoHash) throw new Error("La copia firmada local no coincide con su SHA-256.");
+    const ruta = "/signed/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id)
+        + "&hash=" + encodeURIComponent(albaran.pdfFirmadoHash);
+    const respuesta = await peticionWorker(ruta, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: bytes });
+    if (!respuesta.ok) throw new Error("No se pudo guardar temporalmente el PDF firmado en Cloudflare.");
+    return true;
+}
+
+async function descargarPDFFirmadoCloudflareAIndexedDB(albaran) {
+    if (!albaran || albaran.estado !== "firmado" || !albaran.pdfFirmadoHash) return false;
+    const existente = await obtenerPDFFirmadoInmutable(albaran);
+    if (existente && await sha256HexDataURL(existente) === albaran.pdfFirmadoHash) {
+        albaran.pdfFirmadoVerificado = true;
+        return true;
+    }
+    if (!navigator.onLine || !obtenerTokenSesionApp()) return false;
+    const ruta = "/signed/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id)
+        + "&hash=" + encodeURIComponent(albaran.pdfFirmadoHash);
+    const respuesta = await peticionWorker(ruta, { method: "GET", cache: "no-store" });
+    if (!respuesta.ok) return false;
+    const bytes = new Uint8Array(await respuesta.arrayBuffer());
+    if (!bytes.length) return false;
+    const hash = await sha256HexBytes(bytes);
+    if (hash !== albaran.pdfFirmadoHash) throw new Error("Cloudflare devolvió una copia firmada con SHA-256 distinto.");
+    const clave = clavePDFFirmadoLocal(albaran.empresa, albaran.id);
+    await guardarPDFIndexedDB(clave, uint8ArrayADataURL(bytes, "application/pdf"));
+    albaran.pdfKey = clave;
+    albaran.pdfFirmadoVerificado = true;
+    albaran.pdfFirmadoBytes = bytes.byteLength;
+    albaran.pdfFirmadoOrigen = "cloudflare";
+    // Un dispositivo receptor nunca se convierte en propietario de la subida a Drive.
+    albaran.pendienteSubidaDrive = false;
+    return true;
+}
+
+async function borrarPDFFirmadoCloudflare(albaran) {
+    if (!albaran || !albaran.id || !albaran.empresa || !albaran.pdfFirmadoHash || !navigator.onLine || !obtenerTokenSesionApp()) return false;
+    const ruta = "/signed/pdf?empresa=" + encodeURIComponent(albaran.empresa)
+        + "&id=" + encodeURIComponent(albaran.id)
+        + "&hash=" + encodeURIComponent(albaran.pdfFirmadoHash);
+    const respuesta = await peticionWorker(ruta, { method: "DELETE" });
+    return respuesta.ok || respuesta.status === 404;
+}
+
 async function subirPDFPendienteCloudflare(albaran) {
     if (!albaran || albaran.estado !== "pendiente") return false;
     const pdf = await obtenerPDFAlbaran(albaran);
@@ -884,9 +940,13 @@ async function recuperarPDFsRemotos(albaranes) {
                 albaran.fechaSubidaDrive || null,
                 albaran.pendienteSubidaDrive === true
             ]);
-            const recuperado = albaran.estado === "pendiente"
-                ? await descargarPDFPendienteCloudflareAIndexedDB(albaran)
-                : await descargarPDFDriveAIndexedDB(albaran);
+            let recuperado;
+            if (albaran.estado === "pendiente") {
+                recuperado = await descargarPDFPendienteCloudflareAIndexedDB(albaran);
+            } else {
+                recuperado = await descargarPDFFirmadoCloudflareAIndexedDB(albaran);
+                if (!recuperado) recuperado = await descargarPDFDriveAIndexedDB(albaran);
+            }
             const despues = JSON.stringify([
                 albaran.pdfKey || "",
                 albaran.driveFileId || null,
@@ -947,7 +1007,11 @@ function combinarSyncRapidoConLocal(locales, remotos) {
         if (!local) {
             // Si llega ya firmado, este dispositivo aún NO posee una copia
             // firmada verificada. La recuperará de Drive cuando esté disponible.
-            if (remoto.estado === "firmado") remoto.pdfFirmadoVerificado = false;
+            if (remoto.estado === "firmado") {
+                remoto.pdfFirmadoVerificado = false;
+                remoto.pendienteSubidaDrive = false;
+                remoto.pdfFirmadoOrigen = "remoto";
+            }
             mapa.set(clave, remoto);
             if (remoto.estado === "pendiente") hayPendienteRemotoSinPDF = true;
             continue;
@@ -987,6 +1051,8 @@ function combinarSyncRapidoConLocal(locales, remotos) {
                 // No se puede subir a Drive ni mostrar como copia firmada hasta
                 // reemplazarlo por la copia definitiva del dispositivo firmante.
                 combinado.pdfFirmadoVerificado = false;
+                combinado.pendienteSubidaDrive = false;
+                combinado.pdfFirmadoOrigen = "remoto";
                 delete combinado.pdfFirmadoBytes;
             }
 
@@ -1273,13 +1339,22 @@ async function subirFirmadosPendientesDrive() {
         albaran.estado === "firmado" &&
         albaran.pendienteSubidaDrive === true &&
         albaran.pdfFirmadoVerificado === true &&
+        albaran.pdfFirmadoOrigen === "local" &&
         !!albaran.pdfFirmadoHash
     );
 
     for (const albaran of candidatos) {
         try {
+            // Primero publicamos la copia firmada exacta en el puente temporal.
+            // Si falla Cloudflare, no arriesgamos Drive con un flujo incompleto.
+            await subirPDFFirmadoCloudflare(albaran);
             const resultado = await subirPDFDrive(albaran);
             await registrarSubidaDrive(albaran, resultado);
+            if (resultado?.subido) {
+                void borrarPDFFirmadoCloudflare(albaran).catch(error =>
+                    console.error("Limpieza del firmado temporal pendiente:", error)
+                );
+            }
         } catch (error) {
             console.error("PDF firmado pendiente de Drive:", albaran.numero, error);
         }
@@ -7894,8 +7969,14 @@ async function marcarSubidaDrivePendiente(albaran) {
 
 async function subirFirmaDriveEnFondo(albaran) {
     try {
+        await subirPDFFirmadoCloudflare(albaran);
         const resultadoDrive = await subirPDFDrive(albaran);
         await registrarSubidaDrive(albaran, resultadoDrive);
+        if (resultadoDrive?.subido) {
+            void borrarPDFFirmadoCloudflare(albaran).catch(error =>
+                console.error("Limpieza del firmado temporal pendiente:", error)
+            );
+        }
 
         if (resultadoDrive.subido) {
             mostrarEstadoDriveFondo(

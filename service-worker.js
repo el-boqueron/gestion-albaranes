@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v68-flujo-unico";
+const CACHE_NAME = "gestion-albaranes-v70-cloudflare-firmados";
 
 const ARCHIVOS_APP = [
     "./",
