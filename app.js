@@ -777,6 +777,7 @@ async function descargarPDFDriveAIndexedDB(albaran) {
         : (albaran.pdfKey || clavePDFLocal(albaran.empresa, albaran.id));
     await guardarPDFIndexedDB(clave, pdfDataURL);
     albaran.pdfKey = clave;
+    if (albaran.estado === "firmado") albaran.pdfFirmadoKey = clave;
     albaran.driveFileId = driveFileId;
     if (albaran.estado === "firmado") {
         albaran.pdfFirmadoVerificado = true;
@@ -821,6 +822,7 @@ async function descargarPDFFirmadoCloudflareAIndexedDB(albaran) {
     if (hash !== albaran.pdfFirmadoHash) throw new Error("Cloudflare devolvió una copia firmada con SHA-256 distinto.");
     const clave = clavePDFFirmadoLocal(albaran.empresa, albaran.id);
     await guardarPDFIndexedDB(clave, uint8ArrayADataURL(bytes, "application/pdf"));
+    albaran.pdfFirmadoKey = clave;
     albaran.pdfKey = clave;
     albaran.pdfFirmadoVerificado = true;
     albaran.pdfFirmadoBytes = bytes.byteLength;
@@ -1053,6 +1055,8 @@ function combinarSyncRapidoConLocal(locales, remotos) {
                 combinado.pdfFirmadoVerificado = false;
                 combinado.pendienteSubidaDrive = false;
                 combinado.pdfFirmadoOrigen = "remoto";
+                combinado.pdfFirmadoKey = clavePDFFirmadoLocal(combinado.empresa, combinado.id);
+                combinado.pdfKey = combinado.pdfFirmadoKey;
                 delete combinado.pdfFirmadoBytes;
             }
 
@@ -5611,7 +5615,7 @@ async function obtenerPDFAlbaran(albaran) {
 // V68: Drive nunca lee desde la ruta genérica. Solo desde la copia firmada inmutable.
 async function obtenerPDFFirmadoInmutable(albaran) {
     if (!albaran || albaran.estado !== "firmado") return null;
-    const clave = clavePDFFirmadoLocal(albaran.empresa, albaran.id);
+    const clave = albaran.pdfFirmadoKey || clavePDFFirmadoLocal(albaran.empresa, albaran.id);
     return leerPDFIndexedDB(clave);
 }
 
@@ -7972,11 +7976,10 @@ async function subirFirmaDriveEnFondo(albaran) {
         await subirPDFFirmadoCloudflare(albaran);
         const resultadoDrive = await subirPDFDrive(albaran);
         await registrarSubidaDrive(albaran, resultadoDrive);
-        if (resultadoDrive?.subido) {
-            void borrarPDFFirmadoCloudflare(albaran).catch(error =>
-                console.error("Limpieza del firmado temporal pendiente:", error)
-            );
-        }
+        // V71: NO se borra aquí la copia temporal. Si se eliminase justo al
+        // terminar Drive, otro dispositivo podría no haber tenido tiempo de
+        // descargarla. El Worker la conserva temporalmente y la limpieza
+        // diferida se encarga de retirarla después.
 
         if (resultadoDrive.subido) {
             mostrarEstadoDriveFondo(
@@ -8579,29 +8582,34 @@ async function firmarPDFActual() {
 
 
 
-    const pdfKeyFirmado = clavePDFFirmadoLocal(albaranes[indice].empresa, albaranes[indice].id);
+    // V71: recuperamos literalmente el comportamiento local que ya funcionaba:
+    // la firma sustituye el PDF local del propio albarán y se relee antes de
+    // cambiar su estado. Cloudflare/Drive no intervienen en esta fase.
+    const pdfKeyLocal = albaranes[indice].pdfKey || clavePDFLocal(albaranes[indice].empresa, albaranes[indice].id);
+    await guardarPDFIndexedDB(pdfKeyLocal, pdfFirmadoBase64);
 
-    // V63: primero persistimos el PDF firmado y lo leemos de vuelta.
-    // El albarán NO puede pasar a estado "firmado" si el PDF guardado
-    // no coincide exactamente con el PDF firmado que acabamos de generar.
-    await guardarPDFIndexedDB(pdfKeyFirmado, pdfFirmadoBase64);
-
-    const pdfFirmadoVerificado = await leerPDFIndexedDB(pdfKeyFirmado);
-    if (
-        !pdfFirmadoVerificado
-        ||
-        pdfFirmadoVerificado !== pdfFirmadoBase64
-    ) {
+    const pdfFirmadoVerificado = await leerPDFIndexedDB(pdfKeyLocal);
+    if (!pdfFirmadoVerificado || pdfFirmadoVerificado !== pdfFirmadoBase64) {
         throw new Error(
             "No se pudo verificar el PDF firmado en el almacenamiento del dispositivo. " +
             "El albarán seguirá pendiente y no se subirá a Drive."
         );
     }
 
-    albaranes[indice].pdfKey = pdfKeyFirmado;
+    // Solo DESPUÉS de verificar el guardado local creamos una segunda copia
+    // inmutable para transporte entre dispositivos y subida a Drive.
+    const pdfFirmadoKey = clavePDFFirmadoLocal(albaranes[indice].empresa, albaranes[indice].id);
+    await guardarPDFIndexedDB(pdfFirmadoKey, pdfFirmadoVerificado);
+    const copiaInmutable = await leerPDFIndexedDB(pdfFirmadoKey);
+    if (!copiaInmutable || copiaInmutable !== pdfFirmadoVerificado) {
+        throw new Error("No se pudo crear la copia firmada inmutable de transporte.");
+    }
+
+    albaranes[indice].pdfKey = pdfKeyLocal;
+    albaranes[indice].pdfFirmadoKey = pdfFirmadoKey;
     albaranes[indice].pdfFirmadoVerificado = true;
-    albaranes[indice].pdfFirmadoBytes = dataURLAUint8Array(pdfFirmadoVerificado).byteLength;
-    albaranes[indice].pdfFirmadoHash = await sha256HexDataURL(pdfFirmadoVerificado);
+    albaranes[indice].pdfFirmadoBytes = dataURLAUint8Array(copiaInmutable).byteLength;
+    albaranes[indice].pdfFirmadoHash = await sha256HexDataURL(copiaInmutable);
     albaranes[indice].pdfFirmadoOrigen = "local";
     delete albaranes[indice].pdf;
 
