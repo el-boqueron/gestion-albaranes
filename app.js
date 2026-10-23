@@ -1100,7 +1100,13 @@ async function comprobarSyncRapido(forzar = false) {
         if (!respuesta.ok) throw new Error("No se pudo consultar el estado rápido.");
         const datos = await respuesta.json();
         const revision = datos.revision ?? 0;
-        if (!forzar && revisionSyncRapido !== null && revision === revisionSyncRapido) return false;
+        if (!forzar && revisionSyncRapido !== null && revision === revisionSyncRapido) {
+            // V73: aunque los metadatos no hayan cambiado, el PDF firmado puede
+            // haber llegado al puente temporal unos milisegundos después. Reintentamos
+            // recuperar los bytes pendientes sin esperar a una nueva revisión.
+            await recuperarPDFsRemotos(obtenerAlbaranes());
+            return false;
+        }
 
         const resultado = combinarSyncRapidoConLocal(
             obtenerAlbaranes(),
