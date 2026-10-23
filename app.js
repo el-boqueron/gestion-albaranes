@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V70 PDF FIRMADO TEMPORAL CLOUDFLARE + HASH
+   APP.JS COMPLETO - V72 PRUEBA SIN BORRADO DE FIRMADOS CLOUDFLARE
 
 ========================================================= */
 
@@ -1354,11 +1354,11 @@ async function subirFirmadosPendientesDrive() {
             await subirPDFFirmadoCloudflare(albaran);
             const resultado = await subirPDFDrive(albaran);
             await registrarSubidaDrive(albaran, resultado);
-            if (resultado?.subido) {
-                void borrarPDFFirmadoCloudflare(albaran).catch(error =>
-                    console.error("Limpieza del firmado temporal pendiente:", error)
-                );
-            }
+            // V72 PRUEBA: NO borrar la copia firmada temporal de Cloudflare.
+            // Se conserva para que los demás dispositivos puedan descargarla
+            // y verificarla por SHA-256 incluso después de que Drive confirme la subida.
+            // El borrado se reintroducirá solo cuando tengamos una confirmación segura
+            // de que los dispositivos receptores ya poseen la copia firmada.
         } catch (error) {
             console.error("PDF firmado pendiente de Drive:", albaran.numero, error);
         }
