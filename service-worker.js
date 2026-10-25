@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v75-visor-movil";
+const CACHE_NAME = "gestion-albaranes-v76-drive-inmutable";
 
 const ARCHIVOS_APP = [
     "./",
