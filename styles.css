@@ -1306,7 +1306,7 @@ button {
 
 .pagina-pdf-renderizada {
     display: block;
-    max-width: 100%;
+    max-width: none;
     height: auto !important;
     margin: 0 auto 12px;
     background: #ffffff;
@@ -1694,3 +1694,76 @@ button {
     background: #4285F4;
     transform: skew(-30deg);
 }
+
+
+/* V74 - visor móvil más cercano y registro técnico */
+@media (max-width: 768px) {
+  .pantalla-visor { padding: 6px 4px 105px; }
+  .panel-visor { max-width: none; }
+  .contenedor-pdf { height: calc(100vh - 170px); min-height: 420px; border-radius: 6px; }
+  .visor-pdf-renderizado { padding: 4px; touch-action: pan-x pan-y pinch-zoom; overscroll-behavior: contain; }
+  .pagina-pdf-renderizada { margin-bottom: 6px; }
+}
+.registro-incidencias-bloque { margin: 18px 0; padding: 14px; border: 1px solid #dce2e7; border-radius: 10px; background: #f8fafb; }
+.registro-incidencias-bloque h3 { margin: 0 0 6px; }
+.registro-incidencias { max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 11px; background: #fff; padding: 10px; border: 1px solid #e1e5e9; border-radius: 8px; }
+
+
+/* V75 - previsualización tipo imagen y visor móvil a pantalla completa */
+@media (max-width: 768px) {
+  .visor-pdf-miniatura {
+    height: 100%;
+    overflow: auto;
+    padding: 8px;
+    cursor: zoom-in;
+    touch-action: pan-y;
+    background: #e9edf0;
+  }
+  .visor-pdf-miniatura .pagina-pdf-renderizada {
+    max-width: 100%;
+    margin: 0 auto 8px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.22);
+  }
+}
+.visor-pdf-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  background: #15191c;
+  display: flex;
+  flex-direction: column;
+}
+.visor-pdf-fullscreen-volver {
+  flex: 0 0 auto;
+  min-height: 48px;
+  border: 0;
+  border-bottom: 1px solid rgba(255,255,255,.18);
+  padding: 10px 16px;
+  background: rgba(20,24,27,.98);
+  color: #fff;
+  text-align: left;
+  font-size: 17px;
+  font-weight: 700;
+}
+.visor-pdf-fullscreen-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+.visor-pdf-fullscreen-paginas {
+  width: max-content;
+  min-width: 100%;
+  padding: 4px;
+  text-align: center;
+}
+.visor-pdf-fullscreen-paginas .pagina-pdf-renderizada {
+  display: block;
+  max-width: none;
+  margin: 0 auto 6px;
+  background: #fff;
+  box-shadow: none;
+}
+body.visor-pdf-fullscreen-abierto { overflow: hidden; }

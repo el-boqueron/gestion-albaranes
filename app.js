@@ -42,6 +42,33 @@ const CLAVE_SESION_APP = "gestionAlbaranesSesion";
 let googleAccessToken = null;
 let googleDriveNecesitaAutorizacion = false;
 
+// V74 - Registro local de incidencias/rendimiento (máximo 7 días).
+const CLAVE_REGISTRO_INCIDENCIAS = "gestionAlbaranesIncidenciasV74";
+const CLAVE_ID_DISPOSITIVO = "gestionAlbaranesDispositivo";
+function idDispositivo() {
+    let id = localStorage.getItem(CLAVE_ID_DISPOSITIVO);
+    if (!id) { id = "disp-" + Math.random().toString(36).slice(2, 8); localStorage.setItem(CLAVE_ID_DISPOSITIVO, id); }
+    return id;
+}
+function registrarIncidencia(categoria, operacion, inicio = null, resultado = "ok", error = null) {
+    try {
+        const ahora = Date.now();
+        const limite = ahora - 7 * 24 * 60 * 60 * 1000;
+        const lista = JSON.parse(localStorage.getItem(CLAVE_REGISTRO_INCIDENCIAS) || "[]")
+            .filter(x => Number(x.ts || 0) >= limite);
+        lista.push({ ts: ahora, fecha: new Date(ahora).toISOString(), dispositivo: idDispositivo(), categoria, operacion, duracionMs: inicio ? Math.max(0, ahora - inicio) : null, resultado, error: error ? String(error.message || error).slice(0, 240) : null });
+        localStorage.setItem(CLAVE_REGISTRO_INCIDENCIAS, JSON.stringify(lista.slice(-500)));
+    } catch (_) {}
+}
+function pintarRegistroIncidencias() {
+    const destino = document.getElementById("registroIncidencias");
+    if (!destino) return;
+    try {
+        const lista = JSON.parse(localStorage.getItem(CLAVE_REGISTRO_INCIDENCIAS) || "[]").slice(-80).reverse();
+        destino.textContent = lista.length ? lista.map(x => `${new Date(x.ts).toLocaleString()} · ${x.dispositivo} · ${x.categoria}/${x.operacion} · ${x.duracionMs ?? "-"} ms · ${x.resultado}${x.error ? " · " + x.error : ""}`).join("\n") : "Sin incidencias registradas en los últimos 7 días.";
+    } catch (_) { destino.textContent = "No se pudo leer el registro."; }
+}
+
 const btnGoogleDrive = document.getElementById("btnGoogleDrive");
 const estadoGoogleDrive = document.getElementById("estadoGoogleDrive");
 const pantallaLogin = document.getElementById("pantallaLogin");
@@ -946,8 +973,15 @@ async function recuperarPDFsRemotos(albaranes) {
             if (albaran.estado === "pendiente") {
                 recuperado = await descargarPDFPendienteCloudflareAIndexedDB(albaran);
             } else {
+                // V74: un firmado ya verificado en este dispositivo no se vuelve a consultar.
+                // Esto evita recorrer Drive una y otra vez y bloqueos de minutos.
+                if (albaran.pdfFirmadoVerificado === true) continue;
                 recuperado = await descargarPDFFirmadoCloudflareAIndexedDB(albaran);
-                if (!recuperado) recuperado = await descargarPDFDriveAIndexedDB(albaran);
+                // Si existe huella, la vía rápida es Cloudflare. Drive queda como archivo/fallback
+                // para históricos que no tengan huella, sin frenar la propagación actual.
+                if (!recuperado && !albaran.pdfFirmadoHash) {
+                    recuperado = await descargarPDFDriveAIndexedDB(albaran);
+                }
             }
             const despues = JSON.stringify([
                 albaran.pdfKey || "",
@@ -969,7 +1003,7 @@ async function recuperarPDFsRemotos(albaranes) {
    SINCRONIZACIÓN RÁPIDA - DURABLE OBJECT
 ========================================================= */
 
-const INTERVALO_SYNC_RAPIDO_MS = 2000;
+const INTERVALO_SYNC_RAPIDO_MS = 750;
 let intervaloSyncRapido = null;
 let syncRapidoEnCurso = false;
 let revisionSyncRapido = null;
@@ -1093,6 +1127,7 @@ function programarEnvioSyncRapido() {
 }
 
 async function comprobarSyncRapido(forzar = false) {
+    const inicioSyncRapido = Date.now();
     if (syncRapidoEnCurso || !navigator.onLine || !obtenerTokenSesionApp()) return false;
     syncRapidoEnCurso = true;
     try {
@@ -1127,8 +1162,10 @@ async function comprobarSyncRapido(forzar = false) {
         revisionSyncRapido = revision;
         actualizarContadorPendientes();
         if (!pantallaPendientes.classList.contains("oculto")) cargarListaPendientes();
+        registrarIncidencia("sync", "lectura", inicioSyncRapido, "ok");
         return true;
     } catch (error) {
+        registrarIncidencia("sync", "lectura", inicioSyncRapido, "error", error);
         console.error("Sync rápido (lectura):", error);
         return false;
     } finally {
@@ -1738,7 +1775,6 @@ const btnFirmar =
 
     document.getElementById("btnFirmar");
 
-const btnUsarCopiaFirmada = document.getElementById("btnUsarCopiaFirmada");
 
 
 const btnAbrirEn =
@@ -1892,6 +1928,10 @@ const iframePDF =
 
     document.getElementById("iframePDF");
 
+// V75: retirada definitiva del mecanismo manual antiguo, incluso si quedó HTML en caché.
+const btnCopiaFirmadaAntiguo = document.getElementById("btnUsarCopiaFirmada");
+if (btnCopiaFirmadaAntiguo) btnCopiaFirmadaAntiguo.remove();
+
 
 
 let visorPDFRenderizado = null;
@@ -1943,92 +1983,143 @@ async function mostrarPDFEnVisor(pdfDataURL) {
 
 
 async function mostrarPDFEnVisorMovil(pdfDataURL) {
-
-    if (!pdfDataURL) {
-        throw new Error("No se encuentra el PDF.");
-    }
+    if (!pdfDataURL) throw new Error("No se encuentra el PDF.");
 
     const contenedor = iframePDF.parentElement;
-
     iframePDF.style.display = "none";
     iframePDF.src = "";
 
     if (!visorPDFRenderizado) {
         visorPDFRenderizado = document.createElement("div");
         visorPDFRenderizado.id = "visorPDFRenderizado";
-        visorPDFRenderizado.className = "visor-pdf-renderizado";
+        visorPDFRenderizado.className = "visor-pdf-renderizado visor-pdf-miniatura";
         contenedor.appendChild(visorPDFRenderizado);
     }
 
+    visorPDFRenderizado.className = "visor-pdf-renderizado visor-pdf-miniatura";
     visorPDFRenderizado.style.display = "";
-    visorPDFRenderizado.innerHTML = "";
-
-    const mensaje = document.createElement("div");
-    mensaje.className = "visor-pdf-cargando";
-    mensaje.textContent = "Cargando PDF...";
-    visorPDFRenderizado.appendChild(mensaje);
+    visorPDFRenderizado.innerHTML = '<div class="visor-pdf-cargando">Cargando albarán...</div>';
 
     try {
         const bytesPDF = dataURLAUint8Array(pdfDataURL);
-        const tarea = pdfjsLib.getDocument({ data: bytesPDF });
-        const pdf = await tarea.promise;
+        const pdf = await pdfjsLib.getDocument({ data: bytesPDF }).promise;
+        const pixelRatio = Math.min(Math.max(window.devicePixelRatio || 1, 2), 3);
 
-        visorPDFRenderizado.innerHTML = "";
-
-        const anchoDisponible = Math.max(
-            280,
-            contenedor.clientWidth - 20
-        );
-
-        for (let numeroPagina = 1; numeroPagina <= pdf.numPages; numeroPagina++) {
-            const pagina = await pdf.getPage(numeroPagina);
-            const viewportBase = pagina.getViewport({ scale: 1 });
-            const escalaCSS = Math.min(
-                2,
-                anchoDisponible / viewportBase.width
-            );
-            const pixelRatio = Math.min(
-                window.devicePixelRatio || 1,
-                2
-            );
-            const viewportRender = pagina.getViewport({
-                scale: escalaCSS * pixelRatio
-            });
-
-            const canvas = document.createElement("canvas");
-            canvas.className = "pagina-pdf-renderizada";
-            canvas.width = Math.floor(viewportRender.width);
-            canvas.height = Math.floor(viewportRender.height);
-            canvas.style.width =
-                Math.floor(viewportRender.width / pixelRatio) + "px";
-            canvas.style.height =
-                Math.floor(viewportRender.height / pixelRatio) + "px";
-
-            visorPDFRenderizado.appendChild(canvas);
-
-            const contexto = canvas.getContext("2d", { alpha: false });
-
-            await pagina.render({
-                canvasContext: contexto,
-                viewport: viewportRender
-            }).promise;
+        async function renderizarPaginas(destino, anchoCSS, zoom = 1) {
+            destino.innerHTML = "";
+            for (let numeroPagina = 1; numeroPagina <= pdf.numPages; numeroPagina++) {
+                const pagina = await pdf.getPage(numeroPagina);
+                const viewportBase = pagina.getViewport({ scale: 1 });
+                const escalaCSS = (anchoCSS / viewportBase.width) * zoom;
+                const viewportRender = pagina.getViewport({ scale: escalaCSS * pixelRatio });
+                const canvas = document.createElement("canvas");
+                canvas.className = "pagina-pdf-renderizada";
+                canvas.width = Math.floor(viewportRender.width);
+                canvas.height = Math.floor(viewportRender.height);
+                canvas.style.width = Math.floor(viewportRender.width / pixelRatio) + "px";
+                canvas.style.height = Math.floor(viewportRender.height / pixelRatio) + "px";
+                destino.appendChild(canvas);
+                await pagina.render({
+                    canvasContext: canvas.getContext("2d", { alpha: false }),
+                    viewport: viewportRender
+                }).promise;
+            }
         }
-    }
-    catch (error) {
+
+        // Vista normal: el albarán se comporta como una imagen/previsualización.
+        const anchoMiniatura = Math.max(260, contenedor.clientWidth - 16);
+        await renderizarPaginas(visorPDFRenderizado, anchoMiniatura, 1);
+        visorPDFRenderizado.setAttribute("role", "button");
+        visorPDFRenderizado.setAttribute("aria-label", "Abrir albarán a pantalla completa");
+        visorPDFRenderizado.title = "Pulsa para ampliar";
+
+        visorPDFRenderizado.onclick = async () => {
+            if (document.getElementById("visorPDFFullscreen")) return;
+
+            const capa = document.createElement("div");
+            capa.id = "visorPDFFullscreen";
+            capa.className = "visor-pdf-fullscreen";
+            capa.innerHTML = `
+                <button type="button" class="visor-pdf-fullscreen-volver" aria-label="Volver">← Volver</button>
+                <div class="visor-pdf-fullscreen-scroll">
+                    <div class="visor-pdf-fullscreen-paginas"><div class="visor-pdf-cargando">Cargando albarán...</div></div>
+                </div>`;
+            document.body.appendChild(capa);
+            document.body.classList.add("visor-pdf-fullscreen-abierto");
+
+            const scroll = capa.querySelector(".visor-pdf-fullscreen-scroll");
+            const paginas = capa.querySelector(".visor-pdf-fullscreen-paginas");
+            const volver = capa.querySelector(".visor-pdf-fullscreen-volver");
+            let zoom = 1;
+            let distanciaInicial = 0;
+            let zoomInicial = 1;
+            let escalaTemporal = 1;
+            let cerrando = false;
+
+            const anchoBase = () => Math.max(280, window.innerWidth - 8);
+            const renderFull = async () => {
+                const x = scroll.scrollLeft;
+                const y = scroll.scrollTop;
+                await renderizarPaginas(paginas, anchoBase(), zoom);
+                scroll.scrollLeft = x;
+                scroll.scrollTop = y;
+            };
+            await renderFull();
+
+            const cerrar = () => {
+                if (cerrando) return;
+                cerrando = true;
+                window.removeEventListener("popstate", alAtras);
+                capa.remove();
+                document.body.classList.remove("visor-pdf-fullscreen-abierto");
+                if (history.state?.visorPDFFullscreen) history.back();
+            };
+            const alAtras = () => {
+                if (!document.getElementById("visorPDFFullscreen")) return;
+                cerrando = true;
+                capa.remove();
+                document.body.classList.remove("visor-pdf-fullscreen-abierto");
+                window.removeEventListener("popstate", alAtras);
+            };
+            history.pushState({ ...(history.state || {}), visorPDFFullscreen: true }, "");
+            window.addEventListener("popstate", alAtras);
+            volver.addEventListener("click", cerrar);
+
+            const distancia = touches => Math.hypot(
+                touches[0].clientX - touches[1].clientX,
+                touches[0].clientY - touches[1].clientY
+            );
+            scroll.addEventListener("touchstart", e => {
+                if (e.touches.length === 2) {
+                    distanciaInicial = distancia(e.touches);
+                    zoomInicial = zoom;
+                    escalaTemporal = 1;
+                }
+            }, { passive: true });
+            scroll.addEventListener("touchmove", e => {
+                if (e.touches.length !== 2 || !distanciaInicial) return;
+                e.preventDefault();
+                escalaTemporal = distancia(e.touches) / distanciaInicial;
+                const destino = Math.min(4, Math.max(1, zoomInicial * escalaTemporal));
+                const factor = destino / zoom;
+                paginas.style.transformOrigin = "top center";
+                paginas.style.transform = `scale(${factor})`;
+            }, { passive: false });
+            scroll.addEventListener("touchend", e => {
+                if (!distanciaInicial || e.touches.length >= 2) return;
+                zoom = Math.min(4, Math.max(1, zoomInicial * escalaTemporal));
+                distanciaInicial = 0;
+                escalaTemporal = 1;
+                paginas.style.transform = "";
+                void renderFull();
+            }, { passive: true });
+        };
+    } catch (error) {
         console.error("Error mostrando PDF:", error);
-        visorPDFRenderizado.innerHTML = "";
-
-        const mensajeError = document.createElement("div");
-        mensajeError.className = "visor-pdf-error";
-        mensajeError.textContent =
-            "No se ha podido visualizar el PDF.";
-        visorPDFRenderizado.appendChild(mensajeError);
-
+        visorPDFRenderizado.innerHTML = '<div class="visor-pdf-error">No se ha podido visualizar el PDF.</div>';
         throw error;
     }
 }
-
-
 
 
 
@@ -2470,6 +2561,7 @@ btnConfiguracion.addEventListener("click", () => {
     menuSuperior.classList.add("oculto");
     nombreAutonomo1.value = EMPRESAS.boqueron.nombre;
     nombreAutonomo2.value = EMPRESAS.empresa2.nombre;
+    pintarRegistroIncidencias();
     pantallaConfiguracion.classList.remove("oculto");
 });
 
@@ -6483,7 +6575,6 @@ async function abrirAlbaranPendiente(
 
 
     btnAbrirEn.style.display = "";
-    if (btnUsarCopiaFirmada) btnUsarCopiaFirmada.style.display = "none";
 
     mostrarVisor();
 
@@ -7315,7 +7406,6 @@ async function abrirAlbaranFirmado(
     accionesVisor.style.display = "";
     btnFirmar.style.display = "none";
     btnAbrirEn.style.display = "";
-    if (btnUsarCopiaFirmada) btnUsarCopiaFirmada.style.display = "";
 
     mostrarVisor();
 
@@ -7365,49 +7455,6 @@ btnAbrirEn.addEventListener(
     }
 );
 
-
-// V68 - Recuperación controlada de históricos.
-// Se usa SOLO en el dispositivo donde el usuario ve la firma correcta.
-// Convierte esa copia visible en la autoridad inmutable, publica su huella y
-// permite una única sustitución en Drive. Los demás dispositivos descargarán
-// exactamente esa huella y no volverán a subirla.
-if (btnUsarCopiaFirmada) {
-    btnUsarCopiaFirmada.addEventListener("click", async () => {
-        if (!albaranAbierto || albaranAbierto.estado !== "firmado" || !albaranAbierto.pdf) return;
-        if (!confirm("¿Confirmas que ESTA copia es la que contiene la firma correcta? Solo se usará para reparar este albarán en Drive y en los demás dispositivos.")) return;
-        try {
-            btnUsarCopiaFirmada.disabled = true;
-            const pdf = albaranAbierto.pdf;
-            const claveFirmada = clavePDFFirmadoLocal(albaranAbierto.empresa, albaranAbierto.id);
-            await guardarPDFIndexedDB(claveFirmada, pdf);
-            const verificado = await leerPDFIndexedDB(claveFirmada);
-            if (!verificado || verificado !== pdf) throw new Error("No se pudo verificar la copia firmada.");
-            const hash = await sha256HexDataURL(verificado);
-            const albaranes = obtenerAlbaranes();
-            const i = albaranes.findIndex(a => a.id === albaranAbierto.id && a.empresa === albaranAbierto.empresa);
-            if (i < 0) throw new Error("No se encontró el albarán.");
-            albaranes[i].pdfKey = claveFirmada;
-            albaranes[i].pdfFirmadoHash = hash;
-            albaranes[i].pdfFirmadoVerificado = true;
-            albaranes[i].pdfFirmadoOrigen = "reparacion-local-confirmada";
-            albaranes[i].pendienteSubidaDrive = true;
-            albaranes[i].fechaSubidaDrive = null;
-            albaranes[i].updatedAt = new Date().toISOString();
-            guardarAlbaranes(albaranes);
-            albaranAbierto = { ...albaranes[i], pdf: verificado };
-            await enviarEstadoSyncRapido().catch(() => {});
-            const resultado = await subirPDFDrive(albaranes[i]);
-            await registrarSubidaDrive(albaranes[i], resultado);
-            await enviarEstadoSyncRapido().catch(() => {});
-            alert("Copia firmada fijada como definitiva. Drive queda corregido y los demás dispositivos la recibirán una sola vez.");
-        } catch (error) {
-            console.error("Reparación de firmado:", error);
-            alert("No se pudo completar la reparación. La copia local no se ha borrado.");
-        } finally {
-            btnUsarCopiaFirmada.disabled = false;
-        }
-    });
-}
 
 /* =========================================================
 
@@ -9057,4 +9104,5 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
     actualizarContadorPendientes();
     iniciarAccesoPrivado();
+    registrarIncidencia("arranque", "local-listo", inicioArranque, "ok");
 });

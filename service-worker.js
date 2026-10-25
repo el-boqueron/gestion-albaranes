@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v73-reintento-firmados";
+const CACHE_NAME = "gestion-albaranes-v75-visor-movil";
 
 const ARCHIVOS_APP = [
     "./",
@@ -64,26 +64,23 @@ self.addEventListener("fetch", event => {
     const esArchivoApp = url.origin === self.location.origin;
     const esDependencia = DEPENDENCIAS_EXTERNAS.includes(url.href);
 
-    // V61: con cobertura, los archivos propios se piden primero a la red.
-    // Así una publicación nueva llega al móvil inmediatamente. Si no hay
-    // cobertura, se conserva el arranque offline usando la caché local.
+    // V74: arranque LOCAL PRIMERO. La interfaz sale de caché inmediatamente;
+    // la red solo refresca la caché en segundo plano para la siguiente apertura.
     if (esNavegacion || esArchivoApp) {
         event.respondWith((async () => {
             const cache = await caches.open(CACHE_NAME);
-
-            try {
-                const respuesta = await fetch(event.request, { cache: "no-store" });
-                if (respuesta && respuesta.ok) {
-                    const clave = esNavegacion ? "./index.html" : event.request;
-                    await cache.put(clave, respuesta.clone());
-                }
+            const clave = esNavegacion ? "./index.html" : event.request;
+            const guardado = await cache.match(clave) || await cache.match(event.request);
+            const refresco = fetch(event.request, { cache: "no-store" }).then(async respuesta => {
+                if (respuesta && respuesta.ok) await cache.put(clave, respuesta.clone());
                 return respuesta;
-            } catch (error) {
-                const clave = esNavegacion ? "./index.html" : event.request;
-                const guardado = await cache.match(clave) || await cache.match(event.request);
-                if (guardado) return guardado;
-                return new Response("Sin conexión", { status: 503 });
+            }).catch(() => null);
+            if (guardado) {
+                event.waitUntil(refresco);
+                return guardado;
             }
+            const respuesta = await refresco;
+            return respuesta || new Response("Sin conexión", { status: 503 });
         })());
         return;
     }
