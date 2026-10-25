@@ -2016,6 +2016,10 @@ async function mostrarPDFEnVisorMovil(pdfDataURL) {
             let distanciaInicial = 0;
             let zoomInicial = 1;
             let escalaTemporal = 1;
+            let anclaContenidoX = 0;
+            let anclaContenidoY = 0;
+            let anclaVistaX = 0;
+            let anclaVistaY = 0;
             let cerrando = false;
 
             const anchoBase = () => Math.max(280, window.innerWidth - 8);
@@ -2030,11 +2034,17 @@ async function mostrarPDFEnVisorMovil(pdfDataURL) {
 
             const cerrar = () => {
                 if (cerrando) return;
+                // Si el visor creó una entrada de historial, Atrás debe consumir SOLO
+                // esa entrada. El propio popstate cerrará la capa sin abandonar
+                // la pantalla del albarán donde está el botón Firmar.
+                if (history.state?.visorPDFFullscreen) {
+                    history.back();
+                    return;
+                }
                 cerrando = true;
                 window.removeEventListener("popstate", alAtras);
                 capa.remove();
                 document.body.classList.remove("visor-pdf-fullscreen-abierto");
-                if (history.state?.visorPDFFullscreen) history.back();
             };
             const alAtras = () => {
                 if (!document.getElementById("visorPDFFullscreen")) return;
@@ -2051,11 +2061,24 @@ async function mostrarPDFEnVisorMovil(pdfDataURL) {
                 touches[0].clientX - touches[1].clientX,
                 touches[0].clientY - touches[1].clientY
             );
+            const puntoMedio = touches => ({
+                x: (touches[0].clientX + touches[1].clientX) / 2,
+                y: (touches[0].clientY + touches[1].clientY) / 2
+            });
             scroll.addEventListener("touchstart", e => {
                 if (e.touches.length === 2) {
                     distanciaInicial = distancia(e.touches);
                     zoomInicial = zoom;
                     escalaTemporal = 1;
+
+                    // Guardamos el punto exacto del PDF que queda entre los dos dedos.
+                    // Ese punto será el ancla del zoom, como en una fotografía.
+                    const medio = puntoMedio(e.touches);
+                    const rect = scroll.getBoundingClientRect();
+                    anclaVistaX = medio.x - rect.left;
+                    anclaVistaY = medio.y - rect.top;
+                    anclaContenidoX = scroll.scrollLeft + anclaVistaX;
+                    anclaContenidoY = scroll.scrollTop + anclaVistaY;
                 }
             }, { passive: true });
             scroll.addEventListener("touchmove", e => {
@@ -2063,17 +2086,34 @@ async function mostrarPDFEnVisorMovil(pdfDataURL) {
                 e.preventDefault();
                 escalaTemporal = distancia(e.touches) / distanciaInicial;
                 const destino = Math.min(4, Math.max(1, zoomInicial * escalaTemporal));
-                const factor = destino / zoom;
-                paginas.style.transformOrigin = "top center";
+                const factor = destino / zoomInicial;
+
+                // La previsualización durante el gesto crece alrededor del punto
+                // situado entre los dedos, en vez de alrededor del borde izquierdo.
+                paginas.style.transformOrigin = `${anclaContenidoX}px ${anclaContenidoY}px`;
                 paginas.style.transform = `scale(${factor})`;
             }, { passive: false });
             scroll.addEventListener("touchend", e => {
                 if (!distanciaInicial || e.touches.length >= 2) return;
-                zoom = Math.min(4, Math.max(1, zoomInicial * escalaTemporal));
+                const zoomAnterior = zoomInicial;
+                const zoomNuevo = Math.min(4, Math.max(1, zoomInicial * escalaTemporal));
+                const factorFinal = zoomNuevo / zoomAnterior;
+                const scrollDestinoX = anclaContenidoX * factorFinal - anclaVistaX;
+                const scrollDestinoY = anclaContenidoY * factorFinal - anclaVistaY;
+
+                zoom = zoomNuevo;
                 distanciaInicial = 0;
                 escalaTemporal = 1;
                 paginas.style.transform = "";
-                void renderFull();
+                paginas.style.transformOrigin = "";
+
+                // PDF.js vuelve a dibujar nítido al nuevo zoom y después recolocamos
+                // el scroll para que el mismo punto permanezca bajo los dedos.
+                void (async () => {
+                    await renderFull();
+                    scroll.scrollLeft = Math.max(0, scrollDestinoX);
+                    scroll.scrollTop = Math.max(0, scrollDestinoY);
+                })();
             }, { passive: true });
         };
     } catch (error) {
@@ -2787,6 +2827,13 @@ function volverDentroDeLaApp() {
 }
 
 window.addEventListener("popstate", () => {
+    // La pantalla completa del PDF gestiona su propia entrada de historial.
+    // No dejamos que el manejador general retroceda además desde el albarán
+    // hasta la lista de pendientes en la misma pulsación de Atrás.
+    if (document.getElementById("visorPDFFullscreen")) {
+        return;
+    }
+
     if (volverDentroDeLaApp()) {
         history.pushState(
             { gestionAlbaranes: true, nivel: "app" },

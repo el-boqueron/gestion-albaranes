@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v76-drive-inmutable";
+const CACHE_NAME = "gestion-albaranes-v77-zoom-anclado";
 
 const ARCHIVOS_APP = [
     "./",
