@@ -7603,11 +7603,11 @@ function cerrarPantallaFirma() {
 
 /* =========================================================
 
-   CANVAS FIRMA - V79.3 · LÁPIZ FINO
+   CANVAS FIRMA - V79.4 · LÁPIZ FINO ESTABILIZADO
 
    Resolución adaptada al tamaño real del móvil y al DPR.
-   Trazo fino (2.5 px CSS) y filtrado suave de microtemblores,
-   manteniendo la respuesta en cambios rápidos de dirección.
+   Trazo fino (2.5 px CSS) y estabilización ligeramente mayor de microtemblores,
+   manteniendo la respuesta en movimientos rápidos y cambios de dirección.
 
 ========================================================= */
 
@@ -7618,7 +7618,7 @@ let vectorAnteriorFirma = null;
 let puntoFiltradoFirma = null;
 
 const GROSOR_FIRMA_CSS = 2.5;
-const DISTANCIA_MINIMA_FIRMA = 0.42;
+const DISTANCIA_MINIMA_FIRMA = 0.55;
 
 function configurarContextoFirma() {
     const contexto = canvasFirma.getContext("2d");
@@ -7687,12 +7687,12 @@ canvasFirma.addEventListener(
 
 /* =========================================================
 
-   DIBUJAR FIRMA - V79.3 · OPTIMIZADO PARA LÁPIZ TÁCTIL
+   DIBUJAR FIRMA - V79.4 · LÁPIZ TÁCTIL ESTABILIZADO
 
    - Usa los puntos coalesced del navegador.
-   - Filtra microoscilaciones sin retrasar el trazo.
+   - Filtra un poco más las microoscilaciones del lápiz sobre cristal.
    - Reduce el filtro automáticamente cuando el movimiento es rápido.
-   - Conserva cambios de dirección reales sin crear picos dentados.
+   - Conserva cambios de dirección reales sin redondear en exceso la firma.
 
 ========================================================= */
 
@@ -7740,10 +7740,10 @@ function filtrarPuntoFirma(puntoCrudo) {
 
     // Cuanto más rápido se mueve el lápiz, menos filtramos para evitar retraso.
     let factor;
-    if (distancia >= 7) factor = 0.86;
-    else if (distancia >= 3) factor = 0.72;
-    else if (distancia >= 1.2) factor = 0.58;
-    else factor = 0.42;
+    if (distancia >= 7) factor = 0.90;
+    else if (distancia >= 3) factor = 0.76;
+    else if (distancia >= 1.2) factor = 0.54;
+    else factor = 0.30;
 
     const filtrado = {
         x: puntoFiltradoFirma.x + dx * factor,
@@ -7766,7 +7766,7 @@ function esCambioDireccionRealFirma(desde, hasta) {
     );
 
     // Los cambios de dirección de segmentos diminutos suelen ser temblor.
-    if (longitud < 1.25 || longitudAnterior < 1.25) return false;
+    if (longitud < 1.45 || longitudAnterior < 1.45) return false;
 
     const coseno = Math.max(
         -1,
