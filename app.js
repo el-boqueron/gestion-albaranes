@@ -2,7 +2,7 @@
 
    GESTIÓN DE ALBARANES
 
-   APP.JS COMPLETO - V72 PRUEBA SIN BORRADO DE FIRMADOS CLOUDFLARE
+   APP.JS COMPLETO - V79 OFFLINE LOCAL PRIMERO + SYNC 1S + FIRMA 4PX
 
 ========================================================= */
 
@@ -31,6 +31,9 @@ import {
 pdfjsLib.GlobalWorkerOptions.workerSrc =
 
     "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs";
+
+// V79 - Medición del arranque local. No interviene en los datos ni en la sincronización.
+const inicioArranque = Date.now();
 
 
 /* =========================================================
@@ -102,6 +105,22 @@ async function peticionWorker(ruta, opciones = {}, requiereSesion = true) {
     return fetch(WORKER_URL + ruta, { ...opciones, headers });
 }
 
+// V79 - Para comprobaciones rápidas: una red "fantasma" no debe bloquear el modo local.
+// Se usa solo donde abortar es seguro; las subidas de PDFs conservan su flujo normal.
+async function peticionWorkerConTimeout(ruta, opciones = {}, requiereSesion = true, timeoutMs = 2500) {
+    const controlador = new AbortController();
+    const temporizador = setTimeout(() => controlador.abort(), timeoutMs);
+    try {
+        return await peticionWorker(
+            ruta,
+            { ...opciones, signal: controlador.signal },
+            requiereSesion
+        );
+    } finally {
+        clearTimeout(temporizador);
+    }
+}
+
 async function validarSesionApp() {
     const token = obtenerTokenSesionApp();
 
@@ -124,7 +143,7 @@ async function validarSesionApp() {
     }
 
     try {
-        const respuesta = await peticionWorker("/session");
+        const respuesta = await peticionWorkerConTimeout("/session", { cache: "no-store" }, true, 2500);
 
         if (respuesta.ok) {
             return {
@@ -205,7 +224,6 @@ async function prepararGoogleDriveAutomatico() {
             estadoGoogleDrive.textContent = "Google Drive: conectado · sincronización pendiente";
         }
 
-        iniciarSincronizacionPeriodicaDispositivos();
     } catch (error) {
         console.error("Error obteniendo acceso a Google Drive:", error);
 
@@ -300,41 +318,63 @@ btnGoogleDrive.addEventListener("click", async () => {
 });
 
 async function iniciarAccesoPrivado() {
-    const sesion = await validarSesionApp();
+    const token = obtenerTokenSesionApp();
 
-    if (sesion.valida) {
-        mostrarSeleccionAutonomo();
+    if (!token) {
+        mostrarLogin();
+        return;
+    }
 
-        if (!sesion.modoOffline && navigator.onLine) {
-            estadoGoogleDrive.textContent =
-                "Sincronizando pendientes entre dispositivos...";
+    /*
+     * V79 - ARRANQUE LOCAL PRIMERO.
+     * Una cobertura muy débil puede hacer que Android diga que hay Internet
+     * aunque las peticiones tarden muchísimo en responder. La interfaz y los
+     * datos locales NO esperan a la red: se muestran inmediatamente.
+     */
+    mostrarSeleccionAutonomo();
 
-            /*
-             * Si este dispositivo arranca sin copia local, no mostramos un
-             * 0 provisional que pueda confundirse con que no hay albaranes.
-             * El contador definitivo se coloca al terminar la sincronización.
-             */
-            if (obtenerAlbaranes().length === 0) {
-                contadorPendientes.textContent = "…";
-            }
+    if (!navigator.onLine) {
+        googleAccessToken = null;
+        estadoGoogleDrive.textContent =
+            "Sin cobertura · trabajando en modo local";
+        btnGoogleDrive.textContent =
+            "☁️ Google Drive pendiente de conexión";
+        return;
+    }
+
+    estadoGoogleDrive.textContent =
+        "Datos locales listos · comprobando conexión...";
+
+    // La validación remota se hace en segundo plano y con timeout corto.
+    void (async () => {
+        const sesion = await validarSesionApp();
+
+        if (!sesion.valida) {
+            borrarTokenSesionApp();
+            mostrarLogin();
+            return;
         }
 
         if (sesion.modoOffline || !navigator.onLine) {
             googleAccessToken = null;
             estadoGoogleDrive.textContent =
-                "Sin cobertura · trabajando en modo local";
+                "Conexión insuficiente · trabajando en modo local";
             btnGoogleDrive.textContent =
                 "☁️ Google Drive pendiente de conexión";
             return;
         }
 
         await prepararGoogleDriveAutomatico();
-        return;
-    }
-
-    borrarTokenSesionApp();
-    mostrarLogin();
+    })().catch(error => {
+        console.error("Arranque remoto en segundo plano:", error);
+        googleAccessToken = null;
+        estadoGoogleDrive.textContent =
+            "Conexión insuficiente · trabajando en modo local";
+        btnGoogleDrive.textContent =
+            "☁️ Google Drive pendiente de conexión";
+    });
 }
+
 
 /* =========================================================
    GOOGLE DRIVE - GUARDAR ALBARANES FIRMADOS
@@ -649,9 +689,7 @@ let sincronizacionEnCurso = false;
 let temporizadorSincronizacion = null;
 let omitirSincronizacionAutomatica = false;
 let revisionLocalSincronizacion = 0;
-let intervaloSincronizacionDispositivos = null;
 const CLAVE_SYNC_PENDIENTE = "gestionAlbaranesSyncPendiente";
-const INTERVALO_SYNC_DISPOSITIVOS_MS = 15000;
 let carpetaRaizSincronizacionCache = null;
 let archivoSincronizacionCache = null;
 let modifiedTimeSincronizacionConocido = null;
@@ -958,7 +996,7 @@ async function recuperarPDFsRemotos(albaranes) {
    SINCRONIZACIÓN RÁPIDA - DURABLE OBJECT
 ========================================================= */
 
-const INTERVALO_SYNC_RAPIDO_MS = 750;
+const INTERVALO_SYNC_RAPIDO_MS = 1000;
 let intervaloSyncRapido = null;
 let syncRapidoEnCurso = false;
 let revisionSyncRapido = null;
@@ -1086,7 +1124,7 @@ async function comprobarSyncRapido(forzar = false) {
     if (syncRapidoEnCurso || !navigator.onLine || !obtenerTokenSesionApp()) return false;
     syncRapidoEnCurso = true;
     try {
-        const respuesta = await peticionWorker("/sync", { cache: "no-store" });
+        const respuesta = await peticionWorkerConTimeout("/sync", { cache: "no-store" }, true, 4000);
         if (!respuesta.ok) throw new Error("No se pudo consultar el estado rápido.");
         const datos = await respuesta.json();
         const revision = datos.revision ?? 0;
@@ -1168,18 +1206,6 @@ function marcarSincronizacionLocalPendiente() {
 
 function confirmarSincronizacionLocal() {
     localStorage.removeItem(CLAVE_SYNC_PENDIENTE);
-}
-
-function iniciarSincronizacionPeriodicaDispositivos() {
-    if (intervaloSincronizacionDispositivos) return;
-    intervaloSincronizacionDispositivos = setInterval(() => {
-        if (!document.hidden && navigator.onLine && obtenerTokenSesionApp()) {
-            // V65: la sincronización activa entre dispositivos es únicamente el
-            // Durable Object. El antiguo JSON de Drive no vuelve a aplicarse,
-            // evitando que una copia histórica pueda pisar estados/PDFs actuales.
-            void comprobarSyncRapido();
-        }
-    }, INTERVALO_SYNC_DISPOSITIVOS_MS);
 }
 
 async function obtenerReferenciaSincronizacionRapida() {
@@ -7617,7 +7643,7 @@ const contextoFirma =
 
 
 
-contextoFirma.lineWidth = 6;
+contextoFirma.lineWidth = 4;
 
 
 
@@ -9103,6 +9129,19 @@ window.addEventListener("beforeunload", event => {
     event.returnValue = "";
 });
 
+// V79 - Pide al navegador conservar el almacenamiento local de la PWA cuando sea posible.
+// Si Android/Chrome no lo concede, la aplicación sigue funcionando normalmente.
+async function solicitarAlmacenamientoPersistente() {
+    try {
+        if (!navigator.storage?.persist) return false;
+        if (navigator.storage.persisted && await navigator.storage.persisted()) return true;
+        return await navigator.storage.persist();
+    } catch (error) {
+        console.warn("No se pudo solicitar almacenamiento persistente:", error);
+        return false;
+    }
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
     void bloquearOrientacionVertical();
     try {
@@ -9111,6 +9150,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         console.error("No se pudieron migrar los PDFs al almacenamiento ampliado:", error);
     }
     actualizarContadorPendientes();
-    iniciarAccesoPrivado();
+    void solicitarAlmacenamientoPersistente();
+    void iniciarAccesoPrivado();
     registrarIncidencia("arranque", "local-listo", inicioArranque, "ok");
 });
