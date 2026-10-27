@@ -2243,6 +2243,7 @@ let firmaTieneTrazos = false;
 
 
 let ultimoPuntoFirma = null;
+let ultimoPuntoDibujadoFirma = null;
 
 
 
@@ -2686,6 +2687,9 @@ function ocultarPantallas() {
         .add("oculto");
 
 
+    if (typeof actualizarBloqueoPullRefresh === "function") {
+        actualizarBloqueoPullRefresh();
+    }
 
 }
 
@@ -3012,22 +3016,32 @@ function mostrarPantallaAlbaranesCliente() {
 
 
 
+function actualizarBloqueoPullRefresh() {
+    const bloquear =
+        !pantallaFirma.classList.contains("oculto") ||
+        !pantallaVisor.classList.contains("oculto") ||
+        Boolean(document.getElementById("visorPDFFullscreen"));
+
+    document.documentElement.classList.toggle(
+        "sin-pull-refresh",
+        bloquear
+    );
+    document.body.classList.toggle(
+        "sin-pull-refresh",
+        bloquear
+    );
+}
+
+
 function mostrarVisor() {
-
-
 
     ocultarPantallas();
 
-
-
     pantallaVisor
-
         .classList
-
         .remove("oculto");
 
-
-
+    actualizarBloqueoPullRefresh();
 }
 
 
@@ -7551,210 +7565,130 @@ btnFirmar.addEventListener(
 
 function abrirPantallaFirma() {
 
-
-
-    limpiarFirma();
-
-
-
-
-
     textoFirmaAlbaran.textContent =
-
         albaranAbierto.numero +
-
         " · " +
-
         albaranAbierto.cliente;
 
-
-
-
-
     pantallaFirma
-
         .classList
-
         .remove("oculto");
 
+    actualizarBloqueoPullRefresh();
 
-
+    // El canvas oculto no tiene un tamaño CSS fiable. Lo ajustamos cuando
+    // ya está visible para conservar el mismo grosor en cualquier dirección.
+    requestAnimationFrame(() => {
+        ajustarCanvasFirmaAlTamanoReal();
+        limpiarFirma();
+    });
 }
-
-
-
 
 
 function cerrarPantallaFirma() {
 
-
-
     dibujandoFirma = false;
-
-
-
     ultimoPuntoFirma = null;
-
-
-
-
+    ultimoPuntoDibujadoFirma = null;
+    vectorAnteriorFirma = null;
 
     pantallaFirma
-
         .classList
-
         .add("oculto");
 
-
-
+    actualizarBloqueoPullRefresh();
 }
 
 
-
-
-
 /* =========================================================
 
-   CANVAS FIRMA
+   CANVAS FIRMA - V79.2
+
+   Resolución adaptada al tamaño real del móvil y al DPR.
+   El grosor 4 se interpreta en píxeles CSS, por lo que se ve
+   igual en trazos verticales, horizontales y diagonales.
 
 ========================================================= */
 
+let escalaPixelFirma = 1;
+let anchoCanvasFirmaCSS = 1;
+let altoCanvasFirmaCSS = 1;
+let vectorAnteriorFirma = null;
 
+function configurarContextoFirma() {
+    const contexto = canvasFirma.getContext("2d");
 
-canvasFirma.width = 900;
-
-
-
-canvasFirma.height = 300;
-
-
-
-
-
-const contextoFirma =
-
-    canvasFirma.getContext(
-
-        "2d"
-
+    contexto.setTransform(
+        escalaPixelFirma,
+        0,
+        0,
+        escalaPixelFirma,
+        0,
+        0
     );
 
-
-
-
-
-contextoFirma.lineWidth = 4;
-
-
-
-contextoFirma.lineCap = "round";
-
-
-
-contextoFirma.lineJoin = "round";
-
-
-
-contextoFirma.strokeStyle = "#111111";
-
-
-
-
-
-canvasFirma.addEventListener(
-
-    "pointerdown",
-
-    iniciarFirma
-
-);
-
-
-
-
-
-canvasFirma.addEventListener(
-
-    "pointermove",
-
-    dibujarFirma
-
-);
-
-
-
-
-
-
-canvasFirma.addEventListener(
-
-    "pointerup",
-
-    terminarFirma
-
-);
-
-
-
-
-
-canvasFirma.addEventListener(
-
-    "pointercancel",
-
-    terminarFirma
-
-);
-
-
-
-
-
-canvasFirma.addEventListener(
-
-    "pointerleave",
-
-    event => {
-
-
-
-        if (
-
-            event.pointerType ===
-
-            "mouse"
-
-        ) {
-
-
-
-            terminarFirma(
-
-                event
-
-            );
-
-
-
-        }
-
-
-
+    contexto.lineWidth = 4;
+    contexto.lineCap = "round";
+    contexto.lineJoin = "round";
+    contexto.miterLimit = 2;
+    contexto.strokeStyle = "#111111";
+    contexto.fillStyle = "#111111";
+
+    return contexto;
+}
+
+function ajustarCanvasFirmaAlTamanoReal() {
+    const rectangulo = canvasFirma.getBoundingClientRect();
+    const ancho = Math.max(1, Math.round(rectangulo.width));
+    const alto = Math.max(1, Math.round(rectangulo.height));
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+    const anchoInterno = Math.max(1, Math.round(ancho * dpr));
+    const altoInterno = Math.max(1, Math.round(alto * dpr));
+
+    anchoCanvasFirmaCSS = ancho;
+    altoCanvasFirmaCSS = alto;
+    escalaPixelFirma = dpr;
+
+    if (
+        canvasFirma.width !== anchoInterno ||
+        canvasFirma.height !== altoInterno
+    ) {
+        canvasFirma.width = anchoInterno;
+        canvasFirma.height = altoInterno;
     }
 
+    configurarContextoFirma();
+}
+
+// Tamaño de seguridad hasta que la ventana de firma sea visible.
+canvasFirma.width = 900;
+canvasFirma.height = 300;
+configurarContextoFirma();
+
+canvasFirma.addEventListener("pointerdown", iniciarFirma);
+canvasFirma.addEventListener("pointermove", dibujarFirma);
+canvasFirma.addEventListener("pointerup", terminarFirma);
+canvasFirma.addEventListener("pointercancel", terminarFirma);
+
+canvasFirma.addEventListener(
+    "pointerleave",
+    event => {
+        if (event.pointerType === "mouse") {
+            terminarFirma(event);
+        }
+    }
 );
-
-
-
-
 
 /* =========================================================
 
-   DIBUJAR FIRMA
+   DIBUJAR FIRMA - V79.2
+
+   Usa todos los puntos coalesced del navegador y un suavizado
+   adaptativo. En cambios bruscos de dirección conserva el punto
+   real para no comerse las esquinas al firmar deprisa.
 
 ========================================================= */
-
-
 
 function iniciarFirma(event) {
     event.preventDefault();
@@ -7762,6 +7696,8 @@ function iniciarFirma(event) {
     dibujandoFirma = true;
     firmaTieneTrazos = true;
     ultimoPuntoFirma = obtenerPuntoCanvas(event);
+    ultimoPuntoDibujadoFirma = ultimoPuntoFirma;
+    vectorAnteriorFirma = null;
 
     try {
         canvasFirma.setPointerCapture(event.pointerId);
@@ -7769,13 +7705,9 @@ function iniciarFirma(event) {
     catch (error) {
     }
 
-    const contexto = canvasFirma.getContext("2d");
-    contexto.lineCap = "round";
-    contexto.lineJoin = "round";
-    contexto.strokeStyle = "#111111";
-    contexto.fillStyle = "#111111";
+    const contexto = configurarContextoFirma();
+    const radio = Math.max(2, contexto.lineWidth / 2);
 
-    const radio = Math.max(2.2, contexto.lineWidth / 2);
     contexto.beginPath();
     contexto.arc(
         ultimoPuntoFirma.x,
@@ -7787,46 +7719,103 @@ function iniciarFirma(event) {
     contexto.fill();
 }
 
+function esEsquinaMarcadaFirma(desde, hasta) {
+    if (!vectorAnteriorFirma) return false;
+
+    const vx = hasta.x - desde.x;
+    const vy = hasta.y - desde.y;
+    const longitud = Math.hypot(vx, vy);
+    const longitudAnterior = Math.hypot(
+        vectorAnteriorFirma.x,
+        vectorAnteriorFirma.y
+    );
+
+    if (longitud < 0.01 || longitudAnterior < 0.01) return false;
+
+    const coseno = Math.max(
+        -1,
+        Math.min(
+            1,
+            (vx * vectorAnteriorFirma.x + vy * vectorAnteriorFirma.y) /
+            (longitud * longitudAnterior)
+        )
+    );
+
+    // > 50 grados: prioriza fidelidad de la esquina sobre el suavizado.
+    return Math.acos(coseno) > (50 * Math.PI / 180);
+}
 
 function dibujarSegmentoFirma(event) {
     if (!ultimoPuntoFirma) return;
 
     const puntoFinal = obtenerPuntoCanvas(event);
-    const inicio = ultimoPuntoFirma;
-    const dx = puntoFinal.x - inicio.x;
-    const dy = puntoFinal.y - inicio.y;
+    const dx = puntoFinal.x - ultimoPuntoFirma.x;
+    const dy = puntoFinal.y - ultimoPuntoFirma.y;
     const distancia = Math.hypot(dx, dy);
 
-    /*
-       El navegador puede entregar pocos eventos cuando el lápiz se mueve
-       deprisa. Interpolamos puntos intermedios para que nunca queden huecos
-       visibles en los trazos largos.
-    */
-    const distanciaMaximaEntrePuntos = 2.25;
-    const pasos = Math.max(
-        1,
-        Math.ceil(distancia / distanciaMaximaEntrePuntos)
+    // Solo elimina vibraciones táctiles realmente minúsculas.
+    if (distancia < 0.22) return;
+
+    const contexto = configurarContextoFirma();
+    const esquinaMarcada = esEsquinaMarcadaFirma(
+        ultimoPuntoFirma,
+        puntoFinal
     );
 
-    const contexto = canvasFirma.getContext("2d");
-    contexto.lineCap = "round";
-    contexto.lineJoin = "round";
-    contexto.strokeStyle = "#111111";
-
     contexto.beginPath();
-    contexto.moveTo(inicio.x, inicio.y);
+    contexto.moveTo(
+        ultimoPuntoDibujadoFirma
+            ? ultimoPuntoDibujadoFirma.x
+            : ultimoPuntoFirma.x,
+        ultimoPuntoDibujadoFirma
+            ? ultimoPuntoDibujadoFirma.y
+            : ultimoPuntoFirma.y
+    );
 
-    for (let i = 1; i <= pasos; i++) {
-        const proporcion = i / pasos;
-        const x = inicio.x + dx * proporcion;
-        const y = inicio.y + dy * proporcion;
-        contexto.lineTo(x, y);
+    if (esquinaMarcada) {
+        // Pasa por el punto real para que una esquina rápida no desaparezca.
+        contexto.lineTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y);
+        contexto.lineTo(puntoFinal.x, puntoFinal.y);
+        ultimoPuntoDibujadoFirma = puntoFinal;
+    }
+    else {
+        const puntoMedio = {
+            x: (ultimoPuntoFirma.x + puntoFinal.x) / 2,
+            y: (ultimoPuntoFirma.y + puntoFinal.y) / 2
+        };
+
+        contexto.quadraticCurveTo(
+            ultimoPuntoFirma.x,
+            ultimoPuntoFirma.y,
+            puntoMedio.x,
+            puntoMedio.y
+        );
+
+        ultimoPuntoDibujadoFirma = puntoMedio;
     }
 
     contexto.stroke();
+
+    vectorAnteriorFirma = { x: dx, y: dy };
     ultimoPuntoFirma = puntoFinal;
 }
 
+function completarTrazoFirma() {
+    if (!ultimoPuntoFirma || !ultimoPuntoDibujadoFirma) return;
+
+    const contexto = configurarContextoFirma();
+
+    contexto.beginPath();
+    contexto.moveTo(
+        ultimoPuntoDibujadoFirma.x,
+        ultimoPuntoDibujadoFirma.y
+    );
+    contexto.lineTo(
+        ultimoPuntoFirma.x,
+        ultimoPuntoFirma.y
+    );
+    contexto.stroke();
+}
 
 function dibujarFirma(event) {
     if (!dibujandoFirma || !ultimoPuntoFirma) return;
@@ -7837,7 +7826,6 @@ function dibujarFirma(event) {
 
     if (typeof event.getCoalescedEvents === "function") {
         const eventosAgrupados = event.getCoalescedEvents();
-
         if (eventosAgrupados && eventosAgrupados.length) {
             eventos = eventosAgrupados;
         }
@@ -7847,30 +7835,26 @@ function dibujarFirma(event) {
         dibujarSegmentoFirma(evento);
     }
 
-    /*
-       Algunos navegadores no incluyen el evento principal como último punto
-       de getCoalescedEvents(). Lo añadimos si todavía queda distancia para
-       evitar un pequeño corte al mover el stylus rápidamente.
-    */
+    // Algunos Android no incluyen el evento principal como último coalesced.
     const puntoPrincipal = obtenerPuntoCanvas(event);
-
     if (
         ultimoPuntoFirma &&
         Math.hypot(
             puntoPrincipal.x - ultimoPuntoFirma.x,
             puntoPrincipal.y - ultimoPuntoFirma.y
-        ) > 0.35
+        ) > 0.18
     ) {
         dibujarSegmentoFirma(event);
     }
 }
 
-
 function terminarFirma(event) {
     if (dibujandoFirma && event) {
-        /* Conserva también el último punto del trazo al levantar el lápiz. */
+        event.preventDefault();
+
         try {
             dibujarSegmentoFirma(event);
+            completarTrazoFirma();
         }
         catch (error) {
         }
@@ -7878,11 +7862,10 @@ function terminarFirma(event) {
 
     dibujandoFirma = false;
     ultimoPuntoFirma = null;
+    ultimoPuntoDibujadoFirma = null;
+    vectorAnteriorFirma = null;
 
-    if (
-        event &&
-        event.pointerId !== undefined
-    ) {
+    if (event && event.pointerId !== undefined) {
         try {
             canvasFirma.releasePointerCapture(event.pointerId);
         }
@@ -7891,38 +7874,32 @@ function terminarFirma(event) {
     }
 }
 
-
 function obtenerPuntoCanvas(event) {
     const rectangulo = canvasFirma.getBoundingClientRect();
-    const escalaX = canvasFirma.width / rectangulo.width;
-    const escalaY = canvasFirma.height / rectangulo.height;
-    const margenTrazo = 8;
+    const margenTrazo = 4;
 
-    const xCalculada =
-        (event.clientX - rectangulo.left) * escalaX;
-
-    const yCalculada =
-        (event.clientY - rectangulo.top) * escalaY;
+    // Las coordenadas están en píxeles CSS. El contexto ya aplica el DPR,
+    // evitando la deformación horizontal/vertical del canvas antiguo 900x300.
+    const xCalculada = event.clientX - rectangulo.left;
+    const yCalculada = event.clientY - rectangulo.top;
 
     return {
         x: Math.max(
             margenTrazo,
             Math.min(
-                canvasFirma.width - margenTrazo,
+                Math.max(margenTrazo, anchoCanvasFirmaCSS - margenTrazo),
                 xCalculada
             )
         ),
         y: Math.max(
             margenTrazo,
             Math.min(
-                canvasFirma.height - margenTrazo,
+                Math.max(margenTrazo, altoCanvasFirmaCSS - margenTrazo),
                 yCalculada
             )
         )
     };
 }
-
-
 
 
 /* =========================================================
@@ -7949,17 +7926,13 @@ function limpiarFirma() {
 
 
 
-    contexto.clearRect(
-
-        0,
-
-        0,
-
-        canvasFirma.width,
-
-        canvasFirma.height
-
-    );
+    // clearRect debe usar coordenadas físicas porque el contexto trabaja
+    // escalado por devicePixelRatio.
+    contexto.save();
+    contexto.setTransform(1, 0, 0, 1, 0, 0);
+    contexto.clearRect(0, 0, canvasFirma.width, canvasFirma.height);
+    contexto.restore();
+    configurarContextoFirma();
 
 
 
@@ -7974,8 +7947,8 @@ function limpiarFirma() {
 
 
     ultimoPuntoFirma = null;
-
-
+    ultimoPuntoDibujadoFirma = null;
+    vectorAnteriorFirma = null;
 
 }
 

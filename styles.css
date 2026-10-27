@@ -1767,3 +1767,29 @@ button {
   box-shadow: none;
 }
 body.visor-pdf-fullscreen-abierto { overflow: hidden; }
+
+/* =========================================================
+   V79.2 - FIRMA PRECISA Y SIN PULL-TO-REFRESH
+========================================================= */
+
+/* Mientras el visor o la firma están activos, un arrastre desde el borde
+   superior no debe refrescar/reiniciar la PWA. No afecta al zoom del PDF. */
+html.sin-pull-refresh,
+body.sin-pull-refresh {
+    overscroll-behavior-y: none;
+}
+
+.pantalla-visor,
+.pantalla-firma {
+    overscroll-behavior: none;
+}
+
+.ventana-firma {
+    overscroll-behavior: contain;
+}
+
+/* El canvas recibe todos los gestos de firma y nunca los entrega al navegador. */
+#canvasFirma {
+    touch-action: none;
+    overscroll-behavior: none;
+}
