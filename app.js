@@ -7591,6 +7591,7 @@ function cerrarPantallaFirma() {
     ultimoPuntoFirma = null;
     ultimoPuntoDibujadoFirma = null;
     vectorAnteriorFirma = null;
+    puntoFiltradoFirma = null;
 
     pantallaFirma
         .classList
@@ -7602,11 +7603,11 @@ function cerrarPantallaFirma() {
 
 /* =========================================================
 
-   CANVAS FIRMA - V79.2
+   CANVAS FIRMA - V79.3 · LÁPIZ FINO
 
    Resolución adaptada al tamaño real del móvil y al DPR.
-   El grosor 4 se interpreta en píxeles CSS, por lo que se ve
-   igual en trazos verticales, horizontales y diagonales.
+   Trazo fino (2.5 px CSS) y filtrado suave de microtemblores,
+   manteniendo la respuesta en cambios rápidos de dirección.
 
 ========================================================= */
 
@@ -7614,6 +7615,10 @@ let escalaPixelFirma = 1;
 let anchoCanvasFirmaCSS = 1;
 let altoCanvasFirmaCSS = 1;
 let vectorAnteriorFirma = null;
+let puntoFiltradoFirma = null;
+
+const GROSOR_FIRMA_CSS = 2.5;
+const DISTANCIA_MINIMA_FIRMA = 0.42;
 
 function configurarContextoFirma() {
     const contexto = canvasFirma.getContext("2d");
@@ -7627,7 +7632,7 @@ function configurarContextoFirma() {
         0
     );
 
-    contexto.lineWidth = 4;
+    contexto.lineWidth = GROSOR_FIRMA_CSS;
     contexto.lineCap = "round";
     contexto.lineJoin = "round";
     contexto.miterLimit = 2;
@@ -7682,11 +7687,12 @@ canvasFirma.addEventListener(
 
 /* =========================================================
 
-   DIBUJAR FIRMA - V79.2
+   DIBUJAR FIRMA - V79.3 · OPTIMIZADO PARA LÁPIZ TÁCTIL
 
-   Usa todos los puntos coalesced del navegador y un suavizado
-   adaptativo. En cambios bruscos de dirección conserva el punto
-   real para no comerse las esquinas al firmar deprisa.
+   - Usa los puntos coalesced del navegador.
+   - Filtra microoscilaciones sin retrasar el trazo.
+   - Reduce el filtro automáticamente cuando el movimiento es rápido.
+   - Conserva cambios de dirección reales sin crear picos dentados.
 
 ========================================================= */
 
@@ -7695,8 +7701,11 @@ function iniciarFirma(event) {
 
     dibujandoFirma = true;
     firmaTieneTrazos = true;
-    ultimoPuntoFirma = obtenerPuntoCanvas(event);
-    ultimoPuntoDibujadoFirma = ultimoPuntoFirma;
+
+    const puntoInicial = obtenerPuntoCanvas(event);
+    ultimoPuntoFirma = puntoInicial;
+    ultimoPuntoDibujadoFirma = puntoInicial;
+    puntoFiltradoFirma = puntoInicial;
     vectorAnteriorFirma = null;
 
     try {
@@ -7706,12 +7715,12 @@ function iniciarFirma(event) {
     }
 
     const contexto = configurarContextoFirma();
-    const radio = Math.max(2, contexto.lineWidth / 2);
+    const radio = Math.max(1.15, contexto.lineWidth / 2);
 
     contexto.beginPath();
     contexto.arc(
-        ultimoPuntoFirma.x,
-        ultimoPuntoFirma.y,
+        puntoInicial.x,
+        puntoInicial.y,
         radio,
         0,
         Math.PI * 2
@@ -7719,7 +7728,33 @@ function iniciarFirma(event) {
     contexto.fill();
 }
 
-function esEsquinaMarcadaFirma(desde, hasta) {
+function filtrarPuntoFirma(puntoCrudo) {
+    if (!puntoFiltradoFirma) {
+        puntoFiltradoFirma = puntoCrudo;
+        return puntoCrudo;
+    }
+
+    const dx = puntoCrudo.x - puntoFiltradoFirma.x;
+    const dy = puntoCrudo.y - puntoFiltradoFirma.y;
+    const distancia = Math.hypot(dx, dy);
+
+    // Cuanto más rápido se mueve el lápiz, menos filtramos para evitar retraso.
+    let factor;
+    if (distancia >= 7) factor = 0.86;
+    else if (distancia >= 3) factor = 0.72;
+    else if (distancia >= 1.2) factor = 0.58;
+    else factor = 0.42;
+
+    const filtrado = {
+        x: puntoFiltradoFirma.x + dx * factor,
+        y: puntoFiltradoFirma.y + dy * factor
+    };
+
+    puntoFiltradoFirma = filtrado;
+    return filtrado;
+}
+
+function esCambioDireccionRealFirma(desde, hasta) {
     if (!vectorAnteriorFirma) return false;
 
     const vx = hasta.x - desde.x;
@@ -7730,7 +7765,8 @@ function esEsquinaMarcadaFirma(desde, hasta) {
         vectorAnteriorFirma.y
     );
 
-    if (longitud < 0.01 || longitudAnterior < 0.01) return false;
+    // Los cambios de dirección de segmentos diminutos suelen ser temblor.
+    if (longitud < 1.25 || longitudAnterior < 1.25) return false;
 
     const coseno = Math.max(
         -1,
@@ -7741,23 +7777,23 @@ function esEsquinaMarcadaFirma(desde, hasta) {
         )
     );
 
-    // > 50 grados: prioriza fidelidad de la esquina sobre el suavizado.
-    return Math.acos(coseno) > (50 * Math.PI / 180);
+    return Math.acos(coseno) > (72 * Math.PI / 180);
 }
 
 function dibujarSegmentoFirma(event) {
     if (!ultimoPuntoFirma) return;
 
-    const puntoFinal = obtenerPuntoCanvas(event);
+    const puntoCrudo = obtenerPuntoCanvas(event);
+    const puntoFinal = filtrarPuntoFirma(puntoCrudo);
     const dx = puntoFinal.x - ultimoPuntoFirma.x;
     const dy = puntoFinal.y - ultimoPuntoFirma.y;
     const distancia = Math.hypot(dx, dy);
 
-    // Solo elimina vibraciones táctiles realmente minúsculas.
-    if (distancia < 0.22) return;
+    // Elimina solo microoscilaciones propias del digitalizador/lápiz.
+    if (distancia < DISTANCIA_MINIMA_FIRMA) return;
 
     const contexto = configurarContextoFirma();
-    const esquinaMarcada = esEsquinaMarcadaFirma(
+    const cambioDireccion = esCambioDireccionRealFirma(
         ultimoPuntoFirma,
         puntoFinal
     );
@@ -7772,11 +7808,21 @@ function dibujarSegmentoFirma(event) {
             : ultimoPuntoFirma.y
     );
 
-    if (esquinaMarcada) {
-        // Pasa por el punto real para que una esquina rápida no desaparezca.
-        contexto.lineTo(ultimoPuntoFirma.x, ultimoPuntoFirma.y);
-        contexto.lineTo(puntoFinal.x, puntoFinal.y);
-        ultimoPuntoDibujadoFirma = puntoFinal;
+    if (cambioDireccion) {
+        // Acerca la curva al vértice real, pero sin dibujar dos líneas rígidas
+        // que puedan convertir el pequeño temblor en un pico visible.
+        const entrada = {
+            x: ultimoPuntoFirma.x * 0.82 + puntoFinal.x * 0.18,
+            y: ultimoPuntoFirma.y * 0.82 + puntoFinal.y * 0.18
+        };
+
+        contexto.quadraticCurveTo(
+            ultimoPuntoFirma.x,
+            ultimoPuntoFirma.y,
+            entrada.x,
+            entrada.y
+        );
+        ultimoPuntoDibujadoFirma = entrada;
     }
     else {
         const puntoMedio = {
@@ -7790,7 +7836,6 @@ function dibujarSegmentoFirma(event) {
             puntoMedio.x,
             puntoMedio.y
         );
-
         ultimoPuntoDibujadoFirma = puntoMedio;
     }
 
@@ -7838,11 +7883,11 @@ function dibujarFirma(event) {
     // Algunos Android no incluyen el evento principal como último coalesced.
     const puntoPrincipal = obtenerPuntoCanvas(event);
     if (
-        ultimoPuntoFirma &&
+        puntoFiltradoFirma &&
         Math.hypot(
-            puntoPrincipal.x - ultimoPuntoFirma.x,
-            puntoPrincipal.y - ultimoPuntoFirma.y
-        ) > 0.18
+            puntoPrincipal.x - puntoFiltradoFirma.x,
+            puntoPrincipal.y - puntoFiltradoFirma.y
+        ) > 0.32
     ) {
         dibujarSegmentoFirma(event);
     }
@@ -7864,6 +7909,7 @@ function terminarFirma(event) {
     ultimoPuntoFirma = null;
     ultimoPuntoDibujadoFirma = null;
     vectorAnteriorFirma = null;
+    puntoFiltradoFirma = null;
 
     if (event && event.pointerId !== undefined) {
         try {
@@ -7876,7 +7922,7 @@ function terminarFirma(event) {
 
 function obtenerPuntoCanvas(event) {
     const rectangulo = canvasFirma.getBoundingClientRect();
-    const margenTrazo = 4;
+    const margenTrazo = 3;
 
     // Las coordenadas están en píxeles CSS. El contexto ya aplica el DPR,
     // evitando la deformación horizontal/vertical del canvas antiguo 900x300.
