@@ -1793,3 +1793,33 @@ body.sin-pull-refresh {
     touch-action: none;
     overscroll-behavior: none;
 }
+
+
+/* =========================================================
+   COMPARTIR PDF FIRMADO - V79.6
+========================================================= */
+
+.boton-compartir-pdf {
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    width: 100%;
+    max-width: 600px;
+    min-height: 42px;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: 10px;
+    background: #253b80;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.boton-compartir-pdf:hover {
+    opacity: 0.92;
+}
+
+.boton-compartir-pdf:active {
+    transform: scale(0.99);
+}

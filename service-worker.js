@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v79-4-firma-lapiz-estabilizada";
+const CACHE_NAME = "gestion-albaranes-v79-7-compartir-firma-abajo";
 
 const ARCHIVOS_APP = [
     "./",

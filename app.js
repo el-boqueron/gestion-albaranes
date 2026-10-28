@@ -1770,6 +1770,11 @@ const btnAbrirEn =
     document.getElementById("btnAbrirEn");
 
 
+const btnCompartirPDF =
+
+    document.getElementById("btnCompartirPDF");
+
+
 
 const accionesVisor =
 
@@ -3125,6 +3130,8 @@ btnVolverVisor.addEventListener(
 
 
         btnFirmar.style.display = "";
+
+        btnCompartirPDF.style.display = "none";
 
 
 
@@ -6625,6 +6632,8 @@ async function abrirAlbaranPendiente(
 
     btnAbrirEn.style.display = "";
 
+    btnCompartirPDF.style.display = "none";
+
     mostrarVisor();
 
 
@@ -7454,6 +7463,7 @@ async function abrirAlbaranFirmado(
 
     accionesVisor.style.display = "";
     btnFirmar.style.display = "none";
+    btnCompartirPDF.style.display = "inline-flex";
     btnAbrirEn.style.display = "";
 
     mostrarVisor();
@@ -7464,6 +7474,115 @@ async function abrirAlbaranFirmado(
 
 
 
+
+
+/* =========================================================
+
+   COMPARTIR PDF FIRMADO - V79.6
+
+========================================================= */
+
+btnCompartirPDF.addEventListener(
+    "click",
+    async () => {
+        if (
+            !albaranAbierto ||
+            albaranAbierto.estado !== "firmado" ||
+            !albaranAbierto.pdf
+        ) {
+            alert("No se encuentra el PDF firmado de este albarán.");
+            return;
+        }
+
+        try {
+            const bytes = dataURLAUint8Array(albaranAbierto.pdf);
+
+            const nombreBase =
+                String(
+                    albaranAbierto.driveNombre ||
+                    (albaranAbierto.numero + ".pdf")
+                )
+                .replace(/[\\/:*?"<>|]/g, "-")
+                .trim() || "albaran-firmado.pdf";
+
+            const nombreArchivo =
+                nombreBase.toLowerCase().endsWith(".pdf")
+                    ? nombreBase
+                    : nombreBase + ".pdf";
+
+            const archivoPDF = new File(
+                [bytes],
+                nombreArchivo,
+                { type: "application/pdf" }
+            );
+
+            const datosCompartir = {
+                files: [archivoPDF],
+                title: "Albarán " + albaranAbierto.numero,
+                text: "Albarán firmado " + albaranAbierto.numero
+            };
+
+            const puedeCompartirArchivo =
+                typeof navigator.share === "function" &&
+                (
+                    typeof navigator.canShare !== "function" ||
+                    navigator.canShare({ files: [archivoPDF] })
+                );
+
+            if (puedeCompartirArchivo) {
+                try {
+                    await navigator.share(datosCompartir);
+                    return;
+                }
+                catch (errorCompartir) {
+                    if (errorCompartir?.name === "AbortError") {
+                        return;
+                    }
+
+                    console.error(
+                        "No se pudo abrir el menú de compartir:",
+                        errorCompartir
+                    );
+                }
+            }
+
+            // Respaldo: si este navegador no admite compartir archivos,
+            // descargamos el mismo PDF firmado para compartirlo desde el sistema.
+            const blobPDF = new Blob(
+                [bytes],
+                { type: "application/pdf" }
+            );
+            const urlTemporal = URL.createObjectURL(blobPDF);
+            const enlace = document.createElement("a");
+
+            enlace.href = urlTemporal;
+            enlace.download = nombreArchivo;
+
+            document.body.appendChild(enlace);
+            enlace.click();
+            enlace.remove();
+
+            setTimeout(
+                () => URL.revokeObjectURL(urlTemporal),
+                120000
+            );
+
+            alert(
+                "Este dispositivo no permite compartir archivos PDF directamente desde el navegador. Se ha descargado el PDF para que puedas compartirlo desde el sistema."
+            );
+        }
+        catch (error) {
+            console.error(
+                "No se pudo compartir el PDF firmado:",
+                error
+            );
+
+            alert(
+                "No se ha podido preparar el PDF para compartir."
+            );
+        }
+    }
+);
 
 
 /* =========================================================
@@ -8272,6 +8391,86 @@ btnConfirmarFirma.addEventListener(
 
 /* =========================================================
 
+   RECORTAR FIRMA TRANSPARENTE - V79.7
+
+   Recorta el margen transparente del canvas para que la posición
+   inferior del PDF se aplique al trazo real y no al lienzo completo.
+
+========================================================= */
+
+function obtenerFirmaRecortadaDataURL() {
+    const ancho = canvasFirma.width;
+    const alto = canvasFirma.height;
+
+    if (!ancho || !alto) {
+        return canvasFirma.toDataURL("image/png");
+    }
+
+    const contexto = canvasFirma.getContext("2d");
+    const datos = contexto.getImageData(0, 0, ancho, alto);
+    const pixeles = datos.data;
+
+    let minX = ancho;
+    let minY = alto;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < alto; y += 1) {
+        for (let x = 0; x < ancho; x += 1) {
+            const alpha = pixeles[(y * ancho + x) * 4 + 3];
+
+            if (alpha > 8) {
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+    }
+
+    if (maxX < minX || maxY < minY) {
+        return canvasFirma.toDataURL("image/png");
+    }
+
+    const margen = Math.max(
+        4,
+        Math.round(Math.max(ancho, alto) * 0.01)
+    );
+
+    const recorteX = Math.max(0, minX - margen);
+    const recorteY = Math.max(0, minY - margen);
+    const recorteAncho = Math.min(
+        ancho - recorteX,
+        maxX - minX + 1 + margen * 2
+    );
+    const recorteAlto = Math.min(
+        alto - recorteY,
+        maxY - minY + 1 + margen * 2
+    );
+
+    const canvasRecortado = document.createElement("canvas");
+    canvasRecortado.width = recorteAncho;
+    canvasRecortado.height = recorteAlto;
+
+    const contextoRecortado = canvasRecortado.getContext("2d");
+    contextoRecortado.drawImage(
+        canvasFirma,
+        recorteX,
+        recorteY,
+        recorteAncho,
+        recorteAlto,
+        0,
+        0,
+        recorteAncho,
+        recorteAlto
+    );
+
+    return canvasRecortado.toDataURL("image/png");
+}
+
+
+/* =========================================================
+
    INSERTAR FIRMA EN EL PDF
 
 ========================================================= */
@@ -8332,11 +8531,7 @@ async function firmarPDFActual() {
 
     const firmaDataURL =
 
-        canvasFirma.toDataURL(
-
-            "image/png"
-
-        );
+        obtenerFirmaRecortadaDataURL();
 
 
 
@@ -8562,6 +8757,8 @@ async function firmarPDFActual() {
 
 
 
+    // V79.7: al estar la firma recortada, esta Y se aplica al trazo real.
+    // Se conserva la configuración histórica y: 20 para dejarla abajo.
     const posicionY =
 
         Math.max(
