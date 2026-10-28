@@ -1489,7 +1489,7 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 130,
+            x: 170,
 
             y: 20,
 
@@ -1511,7 +1511,7 @@ const EMPRESAS = {
 
         firma: {
 
-            x: 130,
+            x: 170,
 
             y: 20,
 
