@@ -1823,3 +1823,48 @@ body.sin-pull-refresh {
 .boton-compartir-pdf:active {
     transform: scale(0.99);
 }
+
+
+/* =========================================================
+   V80.1 - COMPARTIR + ELIMINAR COMPACTOS EN PENDIENTES
+========================================================= */
+
+.acciones-pendiente .boton-compartir-pendiente,
+.acciones-pendiente .boton-borrar-pendiente {
+    position: absolute;
+    top: 10px;
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    max-width: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    padding: 0;
+    margin: 0;
+    flex: none !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9px;
+    background: #ffffff;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.acciones-pendiente .boton-compartir-pendiente {
+    right: 56px;
+    border: 1px solid #253b80;
+    color: #253b80;
+}
+
+.acciones-pendiente .boton-borrar-pendiente {
+    right: 10px;
+    border: 1px solid #b3261e;
+    color: #b3261e;
+}
+
+.tarjeta-albaran .fila-tarjeta {
+    padding-right: 94px;
+}

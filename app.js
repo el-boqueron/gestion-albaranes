@@ -927,9 +927,38 @@ async function sincronizarPDFsPendientesCloudflare() {
     try {
         const albaranes = obtenerAlbaranes();
         let cambiosLocales = false;
+
         for (const albaran of albaranes) {
-            if (!albaran || albaran.estado !== "pendiente") continue;
+            if (!albaran) continue;
+
+            // V80: un borrado de pendiente también limpia de forma persistente
+            // su PDF temporal de Cloudflare. Si falló al pulsar la papelera,
+            // se vuelve a intentar al recuperar conexión o sincronizar.
+            if (albaran.estado === "eliminado") {
+                if (albaran.pdfPendienteEliminadoCloudflare === true) continue;
+
+                try {
+                    const borrado = await borrarPDFPendienteCloudflare(albaran);
+                    if (borrado) {
+                        albaran.pdfPendienteEliminadoCloudflare = true;
+                        cambiosLocales = true;
+                    }
+                }
+                catch (error) {
+                    console.error(
+                        "No se pudo limpiar el PDF eliminado de Cloudflare:",
+                        albaran.numero,
+                        error
+                    );
+                }
+
+                continue;
+            }
+
+            if (albaran.estado !== "pendiente") continue;
+
             const pdfLocal = await obtenerPDFAlbaran(albaran);
+
             try {
                 if (pdfLocal) {
                     if (albaran.pdfCloudflareUpdatedAt !== albaran.updatedAt) {
@@ -941,13 +970,16 @@ async function sincronizarPDFsPendientesCloudflare() {
                     const recuperado = await descargarPDFPendienteCloudflareAIndexedDB(albaran);
                     if (recuperado) cambiosLocales = true;
                 }
-            } catch (error) {
+            }
+            catch (error) {
                 console.error("PDF pendiente Cloudflare:", albaran.numero, error);
             }
         }
+
         if (cambiosLocales) guardarAlbaranesSoloLocal(albaranes);
         return true;
-    } finally {
+    }
+    finally {
         sincronizandoPDFsPendientesCloudflare = false;
     }
 }
@@ -1024,75 +1056,146 @@ function albaranParaSyncRapido(albaran) {
 }
 
 function combinarSyncRapidoConLocal(locales, remotos) {
-    const mapa = new Map((locales || []).map(a => [claveUnicaAlbaran(a), a]));
+    const mapa = new Map();
     let hayPendienteRemotoSinPDF = false;
+
+    // V80: construimos el mapa local de forma determinista. Si existen varias
+    // ediciones del mismo número (por ejemplo, borrado + corrección reimportada),
+    // queda como vigente la edición correcta, no simplemente la última del array.
+    for (const localOriginal of locales || []) {
+        if (!localOriginal) continue;
+
+        const local = normalizarAlbaranSincronizado(localOriginal);
+        const clave = claveUnicaAlbaran(local);
+        const existente = mapa.get(clave);
+
+        if (
+            !existente ||
+            compararVigenciaMismoNumero(local, existente) >= 0
+        ) {
+            mapa.set(clave, local);
+        }
+    }
 
     for (const remotoOriginal of remotos || []) {
         if (!remotoOriginal) continue;
+
         const remoto = normalizarAlbaranSincronizado(remotoOriginal);
         const clave = claveUnicaAlbaran(remoto);
         const local = mapa.get(clave);
 
         if (!local) {
-            // Si llega ya firmado, este dispositivo aún NO posee una copia
-            // firmada verificada. La recuperará de Drive cuando esté disponible.
             if (remoto.estado === "firmado") {
                 remoto.pdfFirmadoVerificado = false;
                 remoto.pendienteSubidaDrive = false;
                 remoto.pdfFirmadoOrigen = "remoto";
             }
+
             mapa.set(clave, remoto);
-            if (remoto.estado === "pendiente") hayPendienteRemotoSinPDF = true;
+
+            if (remoto.estado === "pendiente") {
+                hayPendienteRemotoSinPDF = true;
+            }
+
             continue;
         }
 
-        if (!local.driveFileId && remoto.driveFileId && local.estado !== "eliminado") {
+        const mismoId =
+            String(local.id ?? "") ===
+            String(remoto.id ?? "");
+
+        const comparacion =
+            compararVigenciaMismoNumero(
+                remoto,
+                local
+            );
+
+        // Si son dos ediciones distintas del mismo número, no mezclamos sus
+        // pdfKey ni datos locales. La edición más reciente sustituye a la vieja.
+        // Así el PDF corregido (ID nuevo) puede entrar después de un borrado.
+        if (!mismoId) {
+            if (comparacion > 0) {
+                if (remoto.estado === "firmado") {
+                    remoto.pdfFirmadoVerificado = false;
+                    remoto.pendienteSubidaDrive = false;
+                    remoto.pdfFirmadoOrigen = "remoto";
+                    remoto.pdfFirmadoKey =
+                        clavePDFFirmadoLocal(
+                            remoto.empresa,
+                            remoto.id
+                        );
+                    remoto.pdfKey =
+                        remoto.pdfFirmadoKey;
+                }
+
+                mapa.set(clave, remoto);
+
+                if (remoto.estado === "pendiente") {
+                    hayPendienteRemotoSinPDF = true;
+                }
+            }
+
+            continue;
+        }
+
+        // Mismo ID: la prioridad de estados es monotónica.
+        // eliminado > firmado > pendiente. Un pendiente remoto viejo no puede
+        // resucitar un borrado local aunque el reloj de otro móvil esté adelantado.
+        if (comparacion < 0) {
+            continue;
+        }
+
+        if (
+            !local.driveFileId &&
+            remoto.driveFileId &&
+            local.estado !== "eliminado"
+        ) {
             local.driveFileId = remoto.driveFileId;
         }
 
-        // V65: un estado pendiente jamás puede degradar un firmado. Y un firmado
-        // remoto siempre gana a un pendiente local aunque los relojes de los
-        // móviles difieran. Así la firma se propaga en una sola dirección.
-        if (local.estado === "firmado" && remoto.estado === "pendiente") {
-            continue;
+        const remotoConvierteAFirmado =
+            local.estado === "pendiente" &&
+            remoto.estado === "firmado";
+
+        const combinado = {
+            ...local,
+            ...remoto,
+            pdfKey: local.pdfKey || remoto.pdfKey,
+            nombreArchivo: local.nombreArchivo || remoto.nombreArchivo,
+            driveNombre: remoto.driveNombre || local.driveNombre,
+            driveEnlace: remoto.driveEnlace || local.driveEnlace,
+            fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive,
+            pdfFirmadoHash: remoto.pdfFirmadoHash || local.pdfFirmadoHash
+        };
+
+        if (remotoConvierteAFirmado) {
+            combinado.pdfFirmadoVerificado = false;
+            combinado.pendienteSubidaDrive = false;
+            combinado.pdfFirmadoOrigen = "remoto";
+            combinado.pdfFirmadoKey =
+                clavePDFFirmadoLocal(
+                    combinado.empresa,
+                    combinado.id
+                );
+            combinado.pdfKey =
+                combinado.pdfFirmadoKey;
+            delete combinado.pdfFirmadoBytes;
         }
 
-        const remotoConvierteAFirmado =
-            local.estado === "pendiente" && remoto.estado === "firmado";
-        const remotoDebeGanar =
-            remotoConvierteAFirmado
-            || fechaActualizacionAlbaran(remoto) >= fechaActualizacionAlbaran(local);
+        mapa.set(clave, combinado);
 
-        if (remotoDebeGanar) {
-            const combinado = {
-                ...local,
-                ...remoto,
-                pdfKey: local.pdfKey || remoto.pdfKey,
-                nombreArchivo: local.nombreArchivo || remoto.nombreArchivo,
-                driveNombre: remoto.driveNombre || local.driveNombre,
-                driveEnlace: remoto.driveEnlace || local.driveEnlace,
-                fechaSubidaDrive: remoto.fechaSubidaDrive || local.fechaSubidaDrive,
-                pdfFirmadoHash: remoto.pdfFirmadoHash || local.pdfFirmadoHash
-            };
-
-            if (remotoConvierteAFirmado) {
-                // El PDF que ya había en IndexedDB es el original pendiente.
-                // No se puede subir a Drive ni mostrar como copia firmada hasta
-                // reemplazarlo por la copia definitiva del dispositivo firmante.
-                combinado.pdfFirmadoVerificado = false;
-                combinado.pendienteSubidaDrive = false;
-                combinado.pdfFirmadoOrigen = "remoto";
-                combinado.pdfFirmadoKey = clavePDFFirmadoLocal(combinado.empresa, combinado.id);
-                combinado.pdfKey = combinado.pdfFirmadoKey;
-                delete combinado.pdfFirmadoBytes;
-            }
-
-            mapa.set(clave, combinado);
-            if (remoto.estado === "pendiente" && !local.pdfKey) hayPendienteRemotoSinPDF = true;
+        if (
+            remoto.estado === "pendiente" &&
+            !local.pdfKey
+        ) {
+            hayPendienteRemotoSinPDF = true;
         }
     }
 
-    return { albaranes: Array.from(mapa.values()), hayPendienteRemotoSinPDF };
+    return {
+        albaranes: Array.from(mapa.values()),
+        hayPendienteRemotoSinPDF
+    };
 }
 
 async function enviarEstadoSyncRapido(albaranes = obtenerAlbaranes()) {
@@ -1288,6 +1391,183 @@ function fechaActualizacionAlbaran(albaran) {
     return Number.isFinite(idNumerico) ? idNumerico : 0;
 }
 
+// V80: reglas de vigencia para impedir que una copia vieja resucite un borrado.
+// Un ID representa una edición concreta del albarán. Si ese mismo ID fue
+// eliminado, ningún "pendiente" antiguo del mismo ID puede volver a activarlo.
+// Si el usuario importa después un PDF corregido, recibe un ID nuevo y sí puede
+// convertirse en la edición vigente del mismo número.
+function prioridadEstadoAlbaran(estado) {
+    return {
+        pendiente: 1,
+        firmado: 2,
+        eliminado: 3
+    }[estado] || 0;
+}
+
+function compararVigenciaMismoNumero(nuevo, anterior) {
+    if (!anterior) return 1;
+    if (!nuevo) return -1;
+
+    const mismoId =
+        String(nuevo.id ?? "") ===
+        String(anterior.id ?? "");
+
+    // Mismo ID = misma edición. Aquí los estados son monotónicos:
+    // eliminado > firmado > pendiente, independientemente del reloj.
+    if (mismoId) {
+        const prioridadNueva =
+            prioridadEstadoAlbaran(
+                nuevo.estado
+            );
+        const prioridadAnterior =
+            prioridadEstadoAlbaran(
+                anterior.estado
+            );
+
+        if (
+            prioridadNueva !==
+            prioridadAnterior
+        ) {
+            return prioridadNueva >
+                prioridadAnterior
+                ? 1
+                : -1;
+        }
+    }
+
+    const idNuevo =
+        Number(
+            nuevo.id
+        );
+    const idAnterior =
+        Number(
+            anterior.id
+        );
+
+    const idsComparables =
+        !mismoId &&
+        Number.isFinite(idNuevo) &&
+        Number.isFinite(idAnterior) &&
+        idNuevo !== idAnterior;
+
+    // V80: si hay un tombstone y son IDs distintos, el ID funciona como
+    // generación. Los IDs se crean con Date.now al importar:
+    // - una copia antigua con ID menor no puede revivir un borrado;
+    // - una corrección importada después tiene ID mayor y sí puede sustituirlo.
+    if (
+        idsComparables &&
+        (
+            nuevo.estado === "eliminado" ||
+            anterior.estado === "eliminado"
+        )
+    ) {
+        return idNuevo >
+            idAnterior
+            ? 1
+            : -1;
+    }
+
+    const tiempoNuevo =
+        fechaActualizacionAlbaran(
+            nuevo
+        );
+    const tiempoAnterior =
+        fechaActualizacionAlbaran(
+            anterior
+        );
+
+    if (
+        tiempoNuevo !==
+        tiempoAnterior
+    ) {
+        return tiempoNuevo >
+            tiempoAnterior
+            ? 1
+            : -1;
+    }
+
+    if (idsComparables) {
+        return idNuevo >
+            idAnterior
+            ? 1
+            : -1;
+    }
+
+    const prioridadNueva =
+        prioridadEstadoAlbaran(
+            nuevo.estado
+        );
+    const prioridadAnterior =
+        prioridadEstadoAlbaran(
+            anterior.estado
+        );
+
+    if (
+        prioridadNueva !==
+        prioridadAnterior
+    ) {
+        return prioridadNueva >
+            prioridadAnterior
+            ? 1
+            : -1;
+    }
+
+    return 0;
+}
+
+function obtenerRegistrosVigentesPorNumero(
+    albaranes = obtenerAlbaranes(),
+    empresa = empresaActiva
+) {
+    const mapa = new Map();
+
+    for (const original of albaranes || []) {
+        if (!original || original.empresa !== empresa) continue;
+
+        const albaran = normalizarAlbaranSincronizado(original);
+        const clave = String(albaran.numero || albaran.id);
+        const existente = mapa.get(clave);
+
+        if (
+            !existente ||
+            compararVigenciaMismoNumero(albaran, existente) >= 0
+        ) {
+            mapa.set(clave, albaran);
+        }
+    }
+
+    return mapa;
+}
+
+function obtenerRegistroVigenteNumero(
+    numero,
+    empresa = empresaActiva,
+    albaranes = obtenerAlbaranes()
+) {
+    return obtenerRegistrosVigentesPorNumero(
+        albaranes,
+        empresa
+    ).get(String(numero)) || null;
+}
+
+function existeAlbaranActivoNumero(
+    numero,
+    empresa = empresaActiva,
+    albaranes = obtenerAlbaranes()
+) {
+    const vigente =
+        obtenerRegistroVigenteNumero(
+            numero,
+            empresa,
+            albaranes
+        );
+
+    return Boolean(
+        vigente &&
+        vigente.estado !== "eliminado"
+    );
+}
+
 function normalizarAlbaranSincronizado(albaran) {
     const copia = { ...albaran };
     if (!copia.empresa) copia.empresa = "boqueron";
@@ -1309,16 +1589,40 @@ function normalizarAlbaranSincronizado(albaran) {
 
 function combinarAlbaranes(locales, remotos) {
     const mapa = new Map();
+
     for (const original of [...(locales || []), ...(remotos || [])]) {
         if (!original || typeof original !== "object") continue;
-        const albaran = normalizarAlbaranSincronizado(original);
-        const clave = claveUnicaAlbaran(albaran);
-        const existente = mapa.get(clave);
-        if (!existente || fechaActualizacionAlbaran(albaran) >= fechaActualizacionAlbaran(existente)) {
-            mapa.set(clave, albaran);
+
+        const albaran =
+            normalizarAlbaranSincronizado(
+                original
+            );
+        const clave =
+            claveUnicaAlbaran(
+                albaran
+            );
+        const existente =
+            mapa.get(
+                clave
+            );
+
+        if (
+            !existente ||
+            compararVigenciaMismoNumero(
+                albaran,
+                existente
+            ) >= 0
+        ) {
+            mapa.set(
+                clave,
+                albaran
+            );
         }
     }
-    return Array.from(mapa.values());
+
+    return Array.from(
+        mapa.values()
+    );
 }
 
 async function buscarArchivoSincronizacionDrive(carpetaRaiz) {
@@ -3293,13 +3597,10 @@ selectorPDF.addEventListener(
                 error = "No se ha podido detectar el número del albarán.";
             }
             else if (
-                existentes.some(
-                    item =>
-                        item.numero === datos.numero
-                        &&
-                        item.empresa === empresaActiva
-                        &&
-                        item.estado !== "eliminado"
+                existeAlbaranActivoNumero(
+                    datos.numero,
+                    empresaActiva,
+                    existentes
                 )
             ) {
                 error = "Ya está guardado.";
@@ -3424,13 +3725,10 @@ async function guardarItemLote(indice) {
         const albaranes = obtenerAlbaranes();
 
         const yaExiste =
-            albaranes.some(
-                albaran =>
-                    albaran.numero === item.datos.numero
-                    &&
-                    albaran.empresa === empresaActiva
-                    &&
-                    albaran.estado !== "eliminado"
+            existeAlbaranActivoNumero(
+                item.datos.numero,
+                empresaActiva,
+                albaranes
             );
 
         if (yaExiste) {
@@ -5091,13 +5389,10 @@ btnGuardarPendiente.addEventListener(
             obtenerAlbaranes();
 
         const yaExiste =
-            albaranes.some(
-                albaran =>
-                    albaran.numero === albaranActual.numero
-                    &&
-                    albaran.empresa === empresaActiva
-                    &&
-                    albaran.estado !== "eliminado"
+            existeAlbaranActivoNumero(
+                albaranActual.numero,
+                empresaActiva,
+                albaranes
             );
 
         if (yaExiste) {
@@ -5924,43 +6219,19 @@ function migrarAlbaranesAntiguos() {
 
 function obtenerPendientes() {
 
-
-
-    return obtenerAlbaranes()
-
-
-
+    return Array.from(
+        obtenerRegistrosVigentesPorNumero(
+            obtenerAlbaranes(),
+            empresaActiva
+        ).values()
+    )
         .filter(
-
             albaran =>
-
-
-
-                albaran.estado ===
-
-                    "pendiente"
-
-
-
-                &&
-
-
-
-                albaran.empresa ===
-
-                    empresaActiva
-
+                albaran.estado === "pendiente"
         )
-
-
-
         .sort(
-
             compararNumerosAlbaran
-
         );
-
-
 
 }
 
@@ -6272,6 +6543,24 @@ function cargarListaPendientes() {
 
                     <button
 
+                        class="boton-compartir-pendiente"
+
+                        data-id="${albaran.id}"
+
+                        type="button"
+
+                        title="Compartir PDF"
+
+                        aria-label="Compartir PDF del albarán ${escaparHTML(albaran.numero)}"
+
+                    >
+
+                        📤
+
+                    </button>
+
+                    <button
+
                         class="boton-borrar-pendiente"
 
                         data-id="${albaran.id}"
@@ -6365,6 +6654,46 @@ function cargarListaPendientes() {
 
         .querySelectorAll(
 
+            ".boton-compartir-pendiente"
+
+        )
+
+        .forEach(
+
+            boton => {
+
+                boton.addEventListener(
+
+                    "click",
+
+                    async () => {
+
+                        await compartirAlbaranPendiente(
+
+                            Number(
+
+                                boton.dataset.id
+
+                            )
+
+                        );
+
+                    }
+
+                );
+
+            }
+
+        );
+
+
+
+
+
+    listaPendientes
+
+        .querySelectorAll(
+
             ".boton-borrar-pendiente"
 
         )
@@ -6379,11 +6708,9 @@ function cargarListaPendientes() {
 
                     "click",
 
-                    () => {
+                    async () => {
 
-
-
-                        borrarAlbaranPendiente(
+                        await borrarAlbaranPendiente(
 
                             Number(
 
@@ -6392,8 +6719,6 @@ function cargarListaPendientes() {
                             )
 
                         );
-
-
 
                     }
 
@@ -6411,44 +6736,170 @@ function cargarListaPendientes() {
 
 
 
-function borrarAlbaranPendiente(id) {
-
-    const albaranes = obtenerAlbaranes();
-
-    const indice = albaranes.findIndex(
-        albaran =>
-            albaran.id === id
-            &&
-            albaran.empresa === empresaActiva
-            &&
-            albaran.estado === "pendiente"
+async function compartirAlbaranPendiente(id) {
+    const albaran = obtenerAlbaranes().find(
+        item =>
+            item.id === id &&
+            item.empresa === empresaActiva &&
+            item.estado === "pendiente"
     );
+
+    if (!albaran) {
+        alert("No se ha encontrado el albarán pendiente.");
+        return;
+    }
+
+    let pdf = await obtenerPDFAlbaran(albaran);
+
+    if (!pdf && navigator.onLine) {
+        try {
+            const recuperado =
+                await descargarPDFPendienteCloudflareAIndexedDB(albaran);
+
+            if (recuperado) {
+                pdf = await obtenerPDFAlbaran(albaran);
+            }
+        }
+        catch (error) {
+            console.error(
+                "No se pudo recuperar el PDF pendiente para compartir:",
+                error
+            );
+        }
+    }
+
+    if (!pdf) {
+        alert(
+            "El PDF todavía no está disponible en este dispositivo. Comprueba la conexión y vuelve a intentarlo."
+        );
+        return;
+    }
+
+    try {
+        const bytes = dataURLAUint8Array(pdf);
+        const nombreBase =
+            String(
+                albaran.nombreArchivo ||
+                (albaran.numero + ".pdf")
+            )
+            .replace(/[\\/:*?"<>|]/g, "-")
+            .trim() || "albaran-pendiente.pdf";
+
+        const nombreArchivo =
+            nombreBase.toLowerCase().endsWith(".pdf")
+                ? nombreBase
+                : nombreBase + ".pdf";
+
+        const archivoPDF = new File(
+            [bytes],
+            nombreArchivo,
+            { type: "application/pdf" }
+        );
+
+        const datosCompartirPendiente = {
+            files: [archivoPDF],
+            title: "Albarán " + albaran.numero,
+            text: "Albarán pendiente " + albaran.numero
+        };
+
+        const puedeCompartirArchivo =
+            typeof navigator.share === "function" &&
+            (
+                typeof navigator.canShare !== "function" ||
+                navigator.canShare({ files: [archivoPDF] })
+            );
+
+        if (puedeCompartirArchivo) {
+            try {
+                await navigator.share(datosCompartirPendiente);
+                return;
+            }
+            catch (errorCompartir) {
+                if (errorCompartir?.name === "AbortError") {
+                    return;
+                }
+
+                console.error(
+                    "No se pudo abrir el menú de compartir:",
+                    errorCompartir
+                );
+            }
+        }
+
+        const blobPDF = new Blob(
+            [bytes],
+            { type: "application/pdf" }
+        );
+        const urlTemporal = URL.createObjectURL(blobPDF);
+        const enlace = document.createElement("a");
+
+        enlace.href = urlTemporal;
+        enlace.download = nombreArchivo;
+
+        document.body.appendChild(enlace);
+        enlace.click();
+        enlace.remove();
+
+        setTimeout(
+            () => URL.revokeObjectURL(urlTemporal),
+            120000
+        );
+
+        alert(
+            "Este dispositivo no permite compartir archivos PDF directamente desde el navegador. Se ha descargado el PDF para que puedas compartirlo desde el sistema."
+        );
+    }
+    catch (error) {
+        console.error(
+            "No se pudo compartir el PDF pendiente:",
+            error
+        );
+        alert("No se ha podido preparar el PDF para compartir.");
+    }
+}
+
+
+
+async function borrarAlbaranPendiente(id) {
+
+    const albaranes =
+        obtenerAlbaranes();
+
+    const indice =
+        albaranes.findIndex(
+            albaran =>
+                albaran.id === id
+                &&
+                albaran.empresa === empresaActiva
+                &&
+                albaran.estado === "pendiente"
+        );
 
     if (indice === -1) return;
 
-    const albaran = albaranes[indice];
+    const albaran =
+        albaranes[indice];
 
-    const confirmado = confirm(
-        "¿Seguro que quieres borrar el albarán "
-        + albaran.numero
-        + "?\n\nPodrás corregirlo y volverlo a subir después."
-    );
+    const confirmado =
+        confirm(
+            "¿Seguro que quieres borrar el albarán "
+            + albaran.numero
+            + "?\n\nPodrás corregirlo y volverlo a subir inmediatamente."
+        );
 
     if (!confirmado) return;
 
-    /*
-       Se conserva una marca mínima de borrado para sincronizarla.
-       Así Google Drive u otro dispositivo no puede resucitar
-       una copia antigua del albarán.
-    */
-    const ahora = new Date().toISOString();
+    const ahora =
+        new Date().toISOString();
 
-    // Si era pendiente, limpiamos también su copia temporal de Cloudflare.
-    void borrarPDFPendienteCloudflare(albaran).catch(error =>
-        console.error("No se pudo limpiar el PDF pendiente de Cloudflare:", error)
-    );
+    const clavePDFAnterior =
+        albaran.pdfKey ||
+        clavePDFLocal(
+            albaran.empresa,
+            albaran.id
+        );
 
-    albaranes[indice] = {
+    const tombstone = {
         id: albaran.id,
         numero: albaran.numero,
         cliente: albaran.cliente,
@@ -6456,15 +6907,104 @@ function borrarAlbaranPendiente(id) {
         empresa: albaran.empresa,
         estado: "eliminado",
         eliminadoAt: ahora,
-        updatedAt: ahora
+        updatedAt: ahora,
+        pdfPendienteEliminadoCloudflare: false
     };
 
-    guardarAlbaranes(albaranes);
+    // Primero manda el estado local. Desde este instante desaparece de la lista
+    // y la detección de duplicados permite cargar una corrección del mismo número.
+    albaranes[indice] =
+        tombstone;
+
+    guardarAlbaranes(
+        albaranes
+    );
+
     actualizarContadorPendientes();
     cargarListaPendientes();
+
+    // El PDF original ya no debe quedar utilizable en este dispositivo.
+    try {
+        await eliminarPDFIndexedDB(
+            clavePDFAnterior
+        );
+    }
+    catch (error) {
+        console.error(
+            "No se pudo borrar inmediatamente el PDF local eliminado:",
+            error
+        );
+    }
+
+    if (
+        !navigator.onLine ||
+        !obtenerTokenSesionApp()
+    ) {
+        // Sin conexión no se puede hacer desaparecer de otros dispositivos
+        // físicamente en ese instante. El tombstone queda guardado y las
+        // rutinas online/focus lo enviarán en cuanto vuelva la conexión.
+        return;
+    }
+
+    // V80: propagación inmediata. No esperamos al temporizador normal de 80 ms.
+    // El tombstone se envía solo y el PDF pendiente temporal se borra en paralelo.
+    const resultados =
+        await Promise.allSettled([
+            enviarEstadoSyncRapido(
+                [tombstone]
+            ),
+            borrarPDFPendienteCloudflare(
+                albaran
+            )
+        ]);
+
+    if (
+        resultados[1].status === "fulfilled" &&
+        resultados[1].value === true
+    ) {
+        const actuales =
+            obtenerAlbaranes();
+
+        const posicion =
+            actuales.findIndex(
+                item =>
+                    String(item.id) ===
+                        String(tombstone.id)
+                    &&
+                    item.empresa ===
+                        tombstone.empresa
+                    &&
+                    item.estado ===
+                        "eliminado"
+            );
+
+        if (posicion !== -1) {
+            actuales[posicion].pdfPendienteEliminadoCloudflare = true;
+            guardarAlbaranesSoloLocal(
+                actuales
+            );
+        }
+    }
+
+    if (resultados[0].status === "rejected") {
+        console.error(
+            "El borrado se ha guardado localmente, pero queda pendiente de sincronizar:",
+            resultados[0].reason
+        );
+    }
+
+    if (resultados[1].status === "rejected") {
+        console.error(
+            "El PDF temporal queda pendiente de limpieza en Cloudflare:",
+            resultados[1].reason
+        );
+    }
+
+    // Fuerza una lectura para que la revisión central quede alineada tras el borrado.
+    void comprobarSyncRapido(
+        true
+    );
 }
-
-
 
 
 
@@ -8629,9 +9169,9 @@ async function firmarPDFActual() {
 
         {
 
-            x: 130,
+            x: 180,
 
-            y: 20,
+            y: 15,
 
             ancho: 170
 
