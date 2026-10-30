@@ -1796,75 +1796,54 @@ body.sin-pull-refresh {
 
 
 /* =========================================================
-   COMPARTIR PDF FIRMADO - V79.6
+   V80.2 - COMPARTIR PDF PENDIENTE / FIRMADO
 ========================================================= */
 
-.boton-compartir-pdf {
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    width: 100%;
-    max-width: 600px;
-    min-height: 42px;
-    padding: 10px 16px;
-    border: 0;
-    border-radius: 10px;
-    background: #253b80;
-    color: #ffffff;
-    font-size: 15px;
-    font-weight: 700;
-    text-align: center;
-}
-
-.boton-compartir-pdf:hover {
-    opacity: 0.92;
-}
-
-.boton-compartir-pdf:active {
-    transform: scale(0.99);
-}
-
-
-/* =========================================================
-   V80.1 - COMPARTIR + ELIMINAR COMPACTOS EN PENDIENTES
-========================================================= */
-
-.acciones-pendiente .boton-compartir-pendiente,
-.acciones-pendiente .boton-borrar-pendiente {
+.acciones-pendiente .boton-compartir-pendiente {
     position: absolute;
     top: 10px;
+    right: 56px;
     width: 38px;
     height: 38px;
     min-width: 38px;
-    max-width: 38px;
-    min-height: 38px;
-    max-height: 38px;
     padding: 0;
     margin: 0;
-    flex: none !important;
     display: flex;
     align-items: center;
     justify-content: center;
+    border: 1px solid #2f6fad;
     border-radius: 9px;
     background: #ffffff;
+    color: #24588b;
     font-size: 18px;
     line-height: 1;
     cursor: pointer;
-    z-index: 2;
 }
 
-.acciones-pendiente .boton-compartir-pendiente {
-    right: 56px;
-    border: 1px solid #253b80;
-    color: #253b80;
+.acciones-pendiente .boton-compartir-pendiente:disabled {
+    opacity: 0.65;
+    cursor: wait;
 }
 
-.acciones-pendiente .boton-borrar-pendiente {
-    right: 10px;
-    border: 1px solid #b3261e;
-    color: #b3261e;
+.acciones-pendiente .boton-compartir-pendiente.listo-para-compartir {
+    border-color: #166534;
+    background: #eef8f1;
+    color: #166534;
 }
 
-.tarjeta-albaran .fila-tarjeta {
-    padding-right: 94px;
+.boton-compartir-pdf {
+    border: 1px solid #2f6fad;
+    background: #ffffff;
+    color: #24588b;
+    border-radius: 9px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.boton-compartir-pdf.listo-para-compartir {
+    border-color: #166534;
+    background: #eef8f1;
+    color: #166534;
 }

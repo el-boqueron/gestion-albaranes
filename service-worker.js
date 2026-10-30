@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestion-albaranes-v80-1-botones-pendientes";
+const CACHE_NAME = "gestion-albaranes-v80-2-compartir-seguro";
 
 const ARCHIVOS_APP = [
     "./",
